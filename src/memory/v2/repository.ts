@@ -149,10 +149,18 @@ export class MemoryRepository {
     addUnit(bankId: string, unit: MemoryUnit, persist = false): void {
         const bank = this.getOrCreateBank(bankId);
         bank.units.push(unit);
-        bank.meta.settings.pendingFactCount = (bank.meta.settings.pendingFactCount || 0) + 1;
+        // 只有 pending 事实计入巩固积压；skip 事实（P1-2）创建即 done，不得虚增
+        if (unit.consolidationState === 'pending') {
+            bank.meta.settings.pendingFactCount = (bank.meta.settings.pendingFactCount || 0) + 1;
+        }
         this.markDirty(bankId, 'units');
         this.markDirty(bankId, 'meta');
         if (persist) this.save(bankId, ['units', 'meta']);
+    }
+
+    /** 统一 pending 谓词（P1-2）：状态 + 未失效 */
+    pendingCountOf(units: MemoryUnit[]): number {
+        return units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
     }
 
     updateUnit(bankId: string, unit: MemoryUnit, persist = false): void {

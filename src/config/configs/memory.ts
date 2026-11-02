@@ -28,7 +28,9 @@ export default class MemoryConfig {
         seal.ext.registerIntConfig(ext, "长期记忆条数上限", 300, "安全阀：超过后按失效/覆盖/衰减淘汰；0=不限制", "记忆");
         seal.ext.registerIntConfig(ext, "记忆注入 token 预算", MEMORY_PROMPT_TOKEN_BUDGET, "单轮注入记忆总 token 预算", "记忆");
         seal.ext.registerIntConfig(ext, "观察记忆过期天数", 90, "超过该天数无新证据的观察不注入（不删除）", "记忆");
-        seal.ext.registerIntConfig(ext, "后台记忆 LLM 每小时上限", 20, "后台抽取/巩固/刷新每小时最多 LLM 调用次数；0=不限", "记忆");
+        seal.ext.registerFloatConfig(ext, "抽取最低重要度", 0, "低于该值的抽取事实直接丢弃（0=不启用；不可逆，建议先灰度）", "记忆");
+        seal.ext.registerIntConfig(ext, "单轮抽取事实上限", 0, "单轮抽取最多保留多少条事实（按重要度降序截断；0=不限）", "记忆");
+        seal.ext.registerBoolConfig(ext, "事件类不参与观察巩固", false, "事件类事实照常写入长期记忆，但不生成/更新观察（省 LLM，不丢数据）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM重排召回结果", false, "使用 LLM 对召回结果重新排序（较慢）", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM合成观察记忆", true, "使用 LLM 合成观察/做观察决策", "记忆");
         seal.ext.registerBoolConfig(ext, "用LLM推理记忆", true, "使用 LLM 合成心智模型/reflect 答案", "记忆");
@@ -58,7 +60,9 @@ export default class MemoryConfig {
             MEMORY_MAX_FACTS: seal.ext.getIntConfig(ext, "长期记忆条数上限"),
             MEMORY_PROMPT_TOKENS: seal.ext.getIntConfig(ext, "记忆注入 token 预算"),
             OBSERVATION_STALE_DAYS: seal.ext.getIntConfig(ext, "观察记忆过期天数"),
-            BACKGROUND_HOURLY_LLM_CAP: seal.ext.getIntConfig(ext, "后台记忆 LLM 每小时上限"),
+            EXTRACT_MIN_IMPORTANCE: seal.ext.getFloatConfig(ext, "抽取最低重要度"),
+            EXTRACT_MAX_FACTS: seal.ext.getIntConfig(ext, "单轮抽取事实上限"),
+            EXTRACT_EVENT_SKIP_CONSOLIDATION: seal.ext.getBoolConfig(ext, "事件类不参与观察巩固"),
             LLM_RERANK: seal.ext.getBoolConfig(ext, "用LLM重排召回结果"),
             LLM_OBS_SYNTH: seal.ext.getBoolConfig(ext, "用LLM合成观察记忆"),
             LLM_REFLECT_SYNTH: seal.ext.getBoolConfig(ext, "用LLM推理记忆"),

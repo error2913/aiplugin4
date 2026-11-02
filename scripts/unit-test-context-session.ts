@@ -155,14 +155,13 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(replied[1].includes('name'));
 
         await solve(['ctx', 'archive', 'help']);
-        assert.ok(replied[2].includes('手动整理'), replied[2]);
-        assert.ok(replied[2].includes('自动摘要每会话最多 1 次'), replied[2]);
+        assert.ok(replied[2].includes('手动归档'), replied[2]);
 
-        // purge = 新 context epoch：自动摘要额度重置（持久化字段）
-        session.ctxAutoSummaryUsed = 1;
+        // purge = 新 context epoch：归档冷却标记重置
+        session.ctxAutoSummaryBlockedUntil = Date.now() + 60_000;
         await solve(['ctx', 'purge'], [{ name: 'yes' }]);
         assert.ok(replied[3].includes('已清除'), replied[3]);
-        assert.equal(session.ctxAutoSummaryUsed, 0, 'purge 后自动摘要额度应重置');
+        assert.equal(session.ctxAutoSummaryBlockedUntil, 0, 'purge 后归档冷却应重置');
         assert.equal(session.contextV2!.snapshot().events.length, 0, 'purge 后内存服务应重建为空');
         await session.context.addUserMessage({} as seal.MsgContext, '清除后的新消息', 'QQ:1', 'cm2');
         assert.equal(session.contextV2!.snapshot().events.length, 1);
@@ -171,8 +170,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /**
-     * 自动摘要额度（每会话 epoch 最多 1 次，成功才消耗）：
-     * 第一次预算到顶触发摘要成功后 used=1+save；之后即使又超目标也只归档（不再花 LLM）。
+     * 自动归档可重复（P0-4 去掉「每会话一次」额度）：
+     * 第一次预算到顶触发成功后，再次攒出超目标未摘要原文仍会继续归档。
      */
     async testAutoSummaryQuotaUsedOnce(): Promise<void> {
         let auxCalls = 0;
@@ -182,29 +181,24 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any);
         try {
             const h = makeQuotaHarness({ pending: 100_000, omitted: 1 });
-            assert.equal(h.session.ctxAutoSummaryUsed, 0, '新会话额度未用');
             h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => h.session.ctxAutoSummaryUsed === 1, '第一次自动摘要落地');
+            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '第一次自动归档落地');
             assert.equal(auxCalls, 1);
-            assert.equal(h.state.compacts, 1);
             assert.equal(h.session.ctxAutoSummaryInFlight, false, '落地后应清掉在飞标记');
-            assert.equal(h.state.saves, 1, '成功消耗额度后必须持久化（save）');
             assert.equal(h.state.pending, 0, '摘要推进到目标以下');
             assert.equal(h.state.lastBatchTokens, 6000, '目标 30000（预算 100000×30%），单批按 COMPACT_BATCH_TOKENS=6000 截断');
 
-            // 额度已用：再次攒出超目标未摘要原文也不再发起摘要（只归档）
+            // 不再有「每会话一次」限额：再次超目标仍会归档
             h.state.pending = 100_000;
             h.agent.scheduleContextCompaction(h.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(auxCalls, 1, '每会话最多一次自动摘要');
-            assert.equal(h.state.compacts, 1);
-            assert.equal(h.session.ctxAutoSummaryUsed, 1);
+            await waitFor(() => h.state.compacts === 2, '第二次自动归档');
+            assert.equal(auxCalls, 2, '归档可重复，不再受一次性额度限制');
         } finally {
             setAuxLlm(null);
         }
     },
 
-    /** 自动摘要失败（aux 返回空/异常）不消耗额度：used 保持 0、不 save，下一轮可重试 */
+    /** 自动归档失败（aux 返回空）后退避：不立即重试、不提交摘要 */
     async testAutoSummaryQuotaRefundOnFailure(): Promise<void> {
         let auxCalls = 0;
         setAuxLlm({
@@ -214,16 +208,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         try {
             const h = makeQuotaHarness({ pending: 100_000, omitted: 1 });
             h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '第一次摘要失败返回');
+            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '第一次归档失败返回');
             assert.equal(auxCalls, 1);
-            assert.equal(h.session.ctxAutoSummaryUsed, 0, '失败不消耗额度');
-            assert.equal(h.state.saves, 0, '失败不持久化额度');
 
-            // 额度保留 → 下一轮仍可发起（不因为一次失败就永久放弃）
+            // 失败进入 runtime backoff → 立即再触发不再调用
             h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => h.state.compacts === 2, '失败后可重试');
-            assert.equal(auxCalls, 2);
-            assert.equal(h.session.ctxAutoSummaryUsed, 0);
+            await new Promise(resolve => setTimeout(resolve, 30));
+            assert.equal(auxCalls, 1, '失败后退避，不立即重试');
+            assert.equal(h.state.compacts, 1);
         } finally {
             setAuxLlm(null);
         }
@@ -289,7 +281,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             await new Promise(resolve => setTimeout(resolve, 30));
             assert.equal(auxCalls, 1, 'inFlight 期间不得并发发起第二次摘要');
             release!();
-            await waitFor(() => h.session.ctxAutoSummaryUsed === 1, '摘要落地');
+            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '摘要落地');
             assert.equal(h.session.ctxAutoSummaryInFlight, false);
         } finally {
             setAuxLlm(null);
@@ -404,10 +396,12 @@ function makeQuotaHarness(opts: { pending: number; omitted: number | null }): Qu
         flush: async () => ({ ok: true }),
     };
     const session: any = {
+        sessionId: '',
+        agentName: '*',
         contextV2: service,
         setting: { overrides: { ctxBudgetTokens: 100_000 } },
-        ctxAutoSummaryUsed: 0,
         ctxAutoSummaryInFlight: false,
+        ctxAutoSummaryBlockedUntil: 0,
         save: () => { state.saves++; },
     };
     return { agent: Object.create(Agent.prototype), session, state };

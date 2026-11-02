@@ -1,21 +1,16 @@
-// 记忆桥单测：v2 事件消费、成功推进水位、失败不推进/幂等。
+// 归档合并抽取（P0-4）单测：摘要 + facts 同一请求、两阶段草稿、解析失败不降级、共享 runtime。
 import assert from 'node:assert/strict';
 
 import Agent from '../src/agent/agent';
-import { compactContextV2, collectContextBacklog, commitExtraction, consumeContextV2, consumedThrough, peekExtractionChunk, resetContextRuntime, resetContextBridgeCursor } from '../src/agent/context_bridge';
-import { MemoryScheduler, resetMemorySchedulerForTest } from '../src/agent/memory_scheduler';
 import Config from '../src/config/config';
 import { compactionRuntimeFor, resetCompactionRuntime } from '../src/context/compact/session_runtime';
-import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
-import { setHost } from '../src/core/host';
+import { setArchiveFactsSink } from '../src/core/ports/archive_facts';
+import { getHost, setHost } from '../src/core/host';
 import { setAuxLlm } from '../src/core/ports/aux_llm';
-import { MemoryManager } from '../src/memory/manager';
-import { MemoryService, setMemoryEngineFactory } from '../src/memory/service';
-import { MemoryEngine } from '../src/memory/v2/engine';
-import { InMemoryMemoryStorage } from '../src/memory/v2/storage';
 import { SessionService } from '../src/session/session_service';
 import { TokenCalibration } from '../src/token_calibration';
 import { estimateMessageTokens, estimateTextTokens, handleMessages } from '../src/utils/message';
+import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 
 class FakeStorage {
     map = new Map<string, string>();
@@ -52,121 +47,120 @@ async function makeSession(sid: string) {
     session.sessionType = 'user';
     (session.context as any).isColdSession = () => false;
     for (let i = 1; i <= 4; i++) {
-        await session.context.addUserMessage({} as seal.MsgContext, `记忆桥消息 ${i} `.repeat(800), 'QQ:1', `mb${i}`);
+        await session.context.addUserMessage({} as seal.MsgContext, `归档消息 ${i} `.repeat(800), 'QQ:1', `mb${i}`);
     }
     return session;
 }
 
+function combinedReply(facts: any[] = []) {
+    return JSON.stringify({ summary: '这是滚动摘要', facts });
+}
+
+/** 等待异步副作用（fire-and-forget 的后台摘要） */
+async function waitForCondition(predicate: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
+    const start = Date.now();
+    while (!predicate()) {
+        if (Date.now() - start > timeoutMs) throw new Error(`等待超时：${label}`);
+        await new Promise(resolve => setTimeout(resolve, 5));
+    }
+}
+
+interface CapturedFacts {
+    calls: Array<{ sessionId: string; facts: unknown[]; fromSeq: number; toSeq: number }>;
+}
+
 export const tests: Record<string, () => void | Promise<void>> = {
-    async testContextBridgeConsumesAndAdvances() {
+    async testContextArchiveCombinedFacts() {
         installHost();
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
-        const original = MemoryManager.summarizeChunkWithRetry;
-        let calls = 0;
-        (MemoryManager as any).summarizeChunkWithRetry = async () => { calls++; return true; };
-        try {
-            const session = await makeSession('QQ:bridge-ok');
-            resetContextBridgeCursor(session);
-            // 记忆桥按 token 控量（MAX_PENDING_TOKENS=40000 / MAX_CHUNK_TOKENS=4000）：
-            // 多收集几轮越过 6000 token 记忆水位
-            collectContextBacklog(session);
-            collectContextBacklog(session);
-            const consumed = await consumeContextV2(session);
-            assert.ok(consumed > 0);
-            assert.ok(consumedThrough(session) >= 1);
-            assert.ok(calls >= 1, '至少沉淀一块');
-            // 单块 4000 token 不一定清空 pending（总 ~18k token）：继续消费直到低于水位，
-            // 验证 pending 消费语义而不是依赖「一次 collect 的字符量」
-            while (await consumeContextV2(session) > 0) { /* drain */ }
-            const callsAfterDrain = calls;
-            assert.ok(callsAfterDrain >= 1);
-            resetContextRuntime(session);
-            assert.equal(await consumeContextV2(session), 0, '重载后从持久化进度继续，不重复沉淀');
-            assert.equal(calls, callsAfterDrain, '重载后不得额外沉淀');
-        } finally {
-            (MemoryManager as any).summarizeChunkWithRetry = original;
-        }
-    },
-
-    async testContextBridgeFailureKeepsCursor() {
-        installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
-        (Config as any).cache = {};
-        const original = MemoryManager.summarizeChunkWithRetry;
-        (MemoryManager as any).summarizeChunkWithRetry = async () => false;
-        try {
-            const session = await makeSession('QQ:bridge-fail');
-            resetContextBridgeCursor(session);
-            assert.equal(await consumeContextV2(session), 0);
-            assert.equal(consumedThrough(session), 0, '失败不推进');
-        } finally {
-            (MemoryManager as any).summarizeChunkWithRetry = original;
-        }
-    },
-
-    async testContextBridgeSplitCollectPeekCommit() {
-        installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
-        (Config as any).cache = {};
-        const session = await makeSession('QQ:bridge-split');
-        resetContextBridgeCursor(session);
-        // 只收集：0 LLM
-        const before = collectContextBacklog(session);
-        assert.ok(before.pendingChars > 0, '收集后应有 pending');
-        assert.equal(consumedThrough(session), 0, '收集不推进 consumed');
-        const chunk = peekExtractionChunk(session, true);
-        assert.ok(chunk && chunk.text.includes('记忆桥消息'), '应能取到抽取块');
-        // 不 commit：pending 保留，consumed 不推进
-        assert.equal(consumedThrough(session), 0);
-        // 重载后 pending 仍在（持久化 mem_cursor）；生产路径下一轮 run 会先 collect
-        resetContextRuntime(session);
-        collectContextBacklog(session);
-        const pendingAgain = peekExtractionChunk(session, true);
-        assert.ok(pendingAgain && pendingAgain.text.includes('记忆桥消息'), '重载后 pending 仍在');
-        // token 口径（单块 4000 token）下，一块可能小于一条超长事件：此时 commit 只移除已抽取
-        // 文本，consumed 要等整条事件消费完才推进（否则会丢未抽取部分）。循环提交直到 pending 清空。
-        let left: ReturnType<typeof peekExtractionChunk> = chunk!;
-        let commits = 0;
-        while (left) {
-            commitExtraction(session, left.throughSeq, left.textLength);
-            commits++;
-            left = peekExtractionChunk(session, true);
-        }
-        assert.equal(left, null, '提交后无剩余 pending');
-        assert.ok(commits > 1, '超长事件应分多块提交');
-        assert.ok(consumedThrough(session) >= 1, '全部提交后 consumed 应推进');
-    },
-
-    async testContextBridgeSchedulerEndToEnd() {
-        installHost();
-        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
-        (Config as any).cache = {};
-        const engine = new MemoryEngine({ storage: new InMemoryMemoryStorage(), now: () => Math.floor(Date.now() / 1000) });
-        setMemoryEngineFactory(() => engine);
-        resetMemorySchedulerForTest();
-        MemoryScheduler.init();
+        const captured: CapturedFacts = { calls: [] };
+        setArchiveFactsSink(async input => {
+            captured.calls.push({ sessionId: input.sessionId, facts: input.facts, fromSeq: input.fromSeq, toSeq: input.toSeq });
+            return [];
+        });
         setAuxLlm({
-            chat: async () => JSON.stringify({ facts: [{ memory_type: 'private', target_id: 'QQ:bridge-e2e', text: '用户喜欢猫', type: 'fact', confidence: 0.9 }] }),
+            chat: async () => combinedReply([{ memory_type: 'private', target_id: 'QQ:1', text: '用户喜欢猫', type: 'fact', confidence: 0.9 }]),
             chatMessages: async () => '',
         } as any);
         try {
-            const session = await makeSession('QQ:bridge-e2e');
-            resetContextBridgeCursor(session);
-            // collect 按 token 控量（单块 4000 token）；多收集两轮越过 6000 token 记忆水位
-            collectContextBacklog(session);
-            collectContextBacklog(session);
-            MemoryScheduler.onRunEnd(session);
-            assert.equal(MemoryScheduler.status().jobs, 1, 'AI 结束后应入队 extract');
-            const now = Math.floor(Date.now() / 1000);
-            assert.equal(await MemoryScheduler.tick(now), true, 'extract job 应执行');
-            assert.ok(engine.repository.listUnits('user_QQ:bridge-e2e').length > 0, '抽取后应写入事实');
-            // consolidate job（可能已由 extract 入队）
-            if (MemoryScheduler.status().jobs > 0) assert.equal(await MemoryScheduler.tick(now), true);
-            assert.ok(engine.repository.listObservations('user_QQ:bridge-e2e').length > 0, '巩固后应生成观察');
+            const session = await makeSession('QQ:archive-combined');
+            resetCompactionRuntime(session);
+            const result = await compactionRuntimeFor(session)!.archiveNow(1);
+            assert.equal(result.advanced, true);
+            await session.contextV2!.flush();
+            const summaries = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
+            assert.ok(summaries.length >= 1, '应写入滚动摘要记录');
+            assert.ok(captured.calls.length >= 1, '归档段 facts 应交给 sink');
+            assert.equal(captured.calls[0].sessionId, 'QQ:archive-combined');
+            assert.equal(captured.calls[0].facts.length, 1);
+            assert.ok(captured.calls[0].toSeq >= captured.calls[0].fromSeq);
         } finally {
             setAuxLlm(null);
-            resetMemorySchedulerForTest();
+            setArchiveFactsSink(null);
+        }
+    },
+
+    async testContextArchiveFactsFailureDraftReplay() {
+        installHost();
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
+        (Config as any).cache = {};
+        let applied = 0;
+        let fail = true;
+        setArchiveFactsSink(async () => {
+            if (fail) throw new Error('draft-fail');
+            applied++;
+            return [];
+        });
+        setAuxLlm({
+            chat: async () => combinedReply([{ memory_type: 'private', target_id: 'QQ:1', text: '用户喜欢茶', type: 'fact', confidence: 0.9 }]),
+            chatMessages: async () => '',
+        } as any);
+        try {
+            const session = await makeSession('QQ:archive-draft');
+            resetCompactionRuntime(session);
+            const first = await compactionRuntimeFor(session)!.archiveNow(1);
+            assert.equal(first.advanced, true, 'facts 写失败不阻塞摘要提交');
+            const draftKey = 'archive_draft:QQ:archive-draft';
+            const draft = JSON.parse(getHost().storage.get(draftKey) || '{}');
+            assert.equal(draft.applied, false, 'facts 失败应保留未应用草稿');
+
+            // 再攒一些未摘要内容，触发下一次 compact 入口 replay
+            for (let i = 1; i <= 4; i++) {
+                await session.context.addUserMessage({} as seal.MsgContext, `后续消息 ${i} `.repeat(800), 'QQ:1', `mb2-${i}`);
+            }
+            fail = false;
+            await compactionRuntimeFor(session)!.archiveNow(1);
+            assert.ok(applied >= 1, '重放应补写 facts（不重调 LLM）');
+            const after = getHost().storage.get(draftKey);
+            assert.ok(!after, '成功重放后草稿应清除');
+        } finally {
+            setAuxLlm(null);
+            setArchiveFactsSink(null);
+        }
+    },
+
+    async testContextArchiveParseFailureNoFallback() {
+        installHost();
+        (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
+        (Config as any).cache = {};
+        let calls = 0;
+        setArchiveFactsSink(async () => []);
+        setAuxLlm({
+            chat: async () => { calls++; return '这不是 JSON'; },
+            chatMessages: async () => '',
+        } as any);
+        try {
+            const session = await makeSession('QQ:archive-bad-json');
+            resetCompactionRuntime(session);
+            const result = await compactionRuntimeFor(session)!.archiveNow(1);
+            assert.equal(result.advanced, false);
+            assert.equal(result.reason, 'summary-error');
+            assert.equal(calls, 1, '解析失败不做后备，只调一次');
+            assert.equal(session.contextV2!.snapshot().records.filter(r => r.kind === 'summary').length, 0, '不提交摘要');
+        } finally {
+            setAuxLlm(null);
+            setArchiveFactsSink(null);
         }
     },
 
@@ -175,15 +169,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
         setAuxLlm({
-            chat: async () => '这是滚动摘要',
-            chatMessages: async () => '这是滚动摘要',
+            chat: async () => combinedReply(),
+            chatMessages: async () => combinedReply(),
         });
         try {
             const session = await makeSession('QQ:bridge-compact');
-            resetContextRuntime(session);
-            const result = await compactContextV2(session, 1);
-            assert.ok(result, '应返回压缩结果');
-            assert.equal(result!.advanced, true);
+            resetCompactionRuntime(session);
+            const result = await compactionRuntimeFor(session)!.archiveNow(1);
+            assert.equal(result.advanced, true);
             await session.contextV2!.flush();
             const summaries = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
             assert.ok(summaries.length >= 1, '应写入滚动摘要记录');
@@ -196,7 +189,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     /**
      * 编译预算口径回归（P0）：
      * v2 编译的预算必须按 TokenCalibration 校准系数折算、tools 预留必须按 JSON 实际估算，
-     * 否则请求体估算会超出预算且 `omittedFromSeq` 永不出现（“预算到顶”检测不到 → 一次摘要永不触发）。
+     * 否则请求体估算会超出预算且 `omittedFromSeq` 永不出现（“预算到顶”检测不到 → 摘要永不触发）。
      */
     async testContextCompileBudgetMatchesRequestEstimate() {
         installHost();
@@ -210,8 +203,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origAgentGet = Agent.get;
         try {
             TokenCalibration.record('cal-budget-model', 100, 200); // factor = 2
-            // 构造多个小单元（user/assistant 交替），避免命中「最新单元自身超预算」的 truncate 路径，
-            // 从而单独验证预算口径（校准系数 + tools JSON 预留）是否与真实请求估算同口径。
             const sessionService = new SessionService();
             sessionService.agentName = '*';
             Agent.get = (() => ({ sessionService })) as any;
@@ -224,7 +215,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             }
             const real = session.contextV2!;
             let captured: any = null;
-            // 包装真实 service：记录 compile 入参，同时保留真实编译结果与最近统计
             (session as any).contextV2 = {
                 compile: (options: any) => {
                     captured = options;
@@ -258,14 +248,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             const requestEstimate = (out as any[]).reduce((sum, message) => sum + estimateMessageTokens(message), 0)
                 + estimateTextTokens(JSON.stringify(tools));
-            assert.ok(
-                requestEstimate <= captured.budgetTokens,
-                `请求体估算 ${requestEstimate} 应 ≤ 有效预算 ${captured.budgetTokens}`,
-            );
+            assert.ok(requestEstimate <= captured.budgetTokens, `请求体估算 ${requestEstimate} 应 ≤ 有效预算 ${captured.budgetTokens}`);
 
             const stats = real.lastCompile();
             assert.ok(stats, '编译应写入最近编译统计');
-            assert.notEqual(stats!.omittedFromSeq, null, '预算到顶必须能检测到 omittedFromSeq（否则一次摘要永不触发）');
+            assert.notEqual(stats!.omittedFromSeq, null, '预算到顶必须能检测到 omittedFromSeq');
             assert.ok((stats!.omittedToSeq ?? 0) >= 1);
         } finally {
             Agent.get = origAgentGet;
@@ -277,7 +264,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /**
-     * 自动摘要与手动 `.ai ctx archive` 必须共用同一 CompactionRuntime：
+     * 自动归档与手动 `.ai ctx archive` 必须共用同一 CompactionRuntime：
      * 两个“单飞”互不可见时，可同时对同一批未摘要事件 compactOnce → 重复摘要/重复计费。
      */
     async testContextBridgeSharedRuntimeSingleFlight() {
@@ -292,20 +279,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 if (summarizeCalls === 1) {
                     await new Promise<void>(resolve => { release = resolve; });
                 }
-                return '共享 runtime 摘要';
+                return combinedReply();
             },
             chatMessages: async () => '',
         } as any);
         try {
             const session = await makeSession('QQ:bridge-single-flight');
-            resetContextRuntime(session);
             resetCompactionRuntime(session);
             const runtime = compactionRuntimeFor(session);
             assert.ok(runtime, '接入事件账本后应能取到共享运行时');
             assert.equal(compactionRuntimeFor(session), runtime, '自动路径与手动 archive 必须复用同一个 runtime');
 
-            // 自动路径发起并阻塞在摘要 LLM 上；此时手动 archive 应被同一单飞挡下（不并发压同一批事件）
-            const auto = compactContextV2(session, 1);
+            const auto = runtime!.maybeRun(1);
             await waitForCondition(() => summarizeCalls === 1, '自动摘要请求已发出');
             const manual = await runtime!.archiveNow(1);
             assert.equal(manual.ran, false, '自动摘要在飞时手动 archive 不得并发执行');
@@ -314,15 +299,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
 
             release!();
             const autoResult = await auto;
-            assert.ok(autoResult, '自动路径应返回结果');
-            assert.equal(autoResult!.advanced, true);
+            assert.equal(autoResult.advanced, true);
             assert.ok(summarizeCalls >= 1);
 
-            // 共享 runtime 在自动摘要落地后仍可手动归档
             const after = await runtime!.archiveNow(1);
             assert.equal(after.ran, true);
 
-            // purge/热重载语义：reset 后按当前 contextV2 重建 runtime
             resetCompactionRuntime(session);
             assert.notEqual(compactionRuntimeFor(session), runtime, 'reset 后应重建 runtime');
         } finally {
@@ -330,12 +312,3 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 };
-
-/** 等待异步副作用（fire-and-forget 的后台摘要） */
-async function waitForCondition(predicate: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
-    const start = Date.now();
-    while (!predicate()) {
-        if (Date.now() - start > timeoutMs) throw new Error(`等待超时：${label}`);
-        await new Promise(resolve => setTimeout(resolve, 5));
-    }
-}

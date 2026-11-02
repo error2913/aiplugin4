@@ -72,7 +72,6 @@ export class Session {
         rawSeq: 'number',
         lastRawAt: 'number',
         settledSeq: 'number',
-        ctxAutoSummaryUsed: 'number',
         lastMsgRef: { objectValue: 'any' },
         stream: {
             object: {
@@ -175,11 +174,6 @@ export class Session {
     /** 运行时字段：本会话账本——评分调用次数（不持久化；`.ai ctx` 展示用） */
     ctxStats: { judge: number } = { judge: 0 };
     /**
-     * **持久化**：本会话（context epoch）内自动摘要额度，0=未用，1=已用（最多 1 次）。
-     * 只有摘要成功（advanced=true）才置 1；失败/未推进不消耗；`.ai ctx purge --yes` 后重置。
-     */
-    ctxAutoSummaryUsed = 0;
-    /**
      * **持久化**：按端点记录最近一条真实用户消息的原始 `rawId`（A12）。
      * 定时/自主/事件触发时用合成的 msg 没有 rawId，导致"开了回复引用却没有引用"；
      * 起轮前用本表回填。`rawId` 是会话内 message_seq，Session 本身按 sid 索引 ⇒ 等价于 (sid, epId)。
@@ -188,6 +182,8 @@ export class Session {
     lastMsgRef: { [epId: string]: number } = {};
     /** 运行时字段：自动摘要已发起未落地，防同一会话并发重复触发（不持久化，重载后回 false） */
     ctxAutoSummaryInFlight = false;
+    /** 运行时字段：missing-history 后的自动归档冷却截止（毫秒，P2-3；不持久化） */
+    ctxAutoSummaryBlockedUntil = 0;
     /** 运行时字段：上次补注册规则 timer 的时间（毫秒；节流用，不持久化） */
     lastRuleTimerEnsureAt = 0;
     /** 运行时字段：保存节流状态（不持久化） */
@@ -197,6 +193,8 @@ export class Session {
     tool: {
         state: ToolState,
         callCount: number, // 单次触发调用函数计数
+        /** 同一轮内各工具「确定性失败」连续次数（P2-2；运行时不持久化） */
+        failStreak: Record<string, number>,
         listen: ToolListen // 监听调用函数发送的内容
     }
     /** 技能会话级启用开关：false=本会话关闭，缺省/true=开启 */
@@ -236,6 +234,7 @@ export class Session {
         this.tool = {
             state: {} as ToolState,
             callCount: 0,
+            failStreak: {},
             listen
         }
         this.skillState = {};
@@ -287,6 +286,7 @@ export class Session {
         this.context.timer = null;
         this.context.counter = 0;
         this.tool.callCount = 0;
+        this.tool.failStreak = {};
     }
 
     /**

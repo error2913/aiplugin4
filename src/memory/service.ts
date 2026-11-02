@@ -1,6 +1,7 @@
 // 记忆统一门面：命令/工具/注入/调度都只经过这里。
 import Config from "../config/config";
 import { getAuxLlm } from "../core/ports/aux_llm";
+import { logger } from "../logger";
 import type { Session } from "../session/session";
 import { normalizeGroupId, normalizeUserId } from "../utils/target_id";
 
@@ -41,6 +42,11 @@ export interface SessionRef {
     sessionId: string;
     agentName?: string;
     sessionType?: 'user' | 'group';
+}
+
+export interface SessionRef {
+    sessionId: string;
+    agentName?: string;
 }
 
 export interface RetainForSessionInput extends Partial<RetainInput> {
@@ -173,20 +179,34 @@ export class MemoryService {
     static async extractFromChunk(session: Session, chunk: { text: string; throughSeq: number; textLength: number }, source: 'ai' | 'archive' | 'manual' = 'ai'): Promise<ExtractOutcome> {
         const content = String(chunk?.text || '').trim();
         if (!content || !configBool('MEMORY_ENABLED', true)) return { touchedBanks: [], factsAdded: 0, factsInvalidated: 0, factsDropped: 0, touchedTags: [] };
-        const facts = await this.extractFacts(session, content);
+        let facts = await this.extractFacts(session, content);
+        const rawFactCount = facts.length;
+        // P1-2 条数上限：先在代码里按 importance 降序，再截断（不依赖模型输出顺序）
+        const cap = configInt('EXTRACT_MAX_FACTS', 0);
+        if (cap > 0 && facts.length > cap) {
+            facts = facts.slice()
+                .sort((a, b) => Number(b?.importance ?? 0.5) - Number(a?.importance ?? 0.5))
+                .slice(0, cap);
+        }
         const outcome: ExtractOutcome = { touchedBanks: [], factsAdded: 0, factsInvalidated: 0, factsDropped: 0, touchedTags: [] };
         const touched = new Set<string>();
         for (const fact of facts) {
-            const applied = await this.applyFact(session, fact, source);
+            const applied = await this.applyFact(session, fact, source, { deferSave: true });
             outcome.factsAdded += applied.added;
             outcome.factsInvalidated += applied.invalidated;
             outcome.factsDropped += applied.dropped ? 1 : 0;
             for (const bank of applied.banks) touched.add(bank);
             for (const tag of applied.tags) outcome.touchedTags.push(tag);
         }
+        // P2-1 写放大：整轮只落盘一次（原来每条事实 save 一次）
+        const repo = getEngine().repository;
+        for (const bank of touched) repo.save(bank, ['units', 'links', 'obs', 'meta']);
         outcome.touchedBanks = Array.from(touched);
         outcome.touchedTags = uniq(outcome.touchedTags);
         if (outcome.factsAdded || outcome.factsInvalidated) bumpMemoryRevision();
+        if (rawFactCount !== facts.length || outcome.factsDropped > 0) {
+            logger.info(`[extract] facts×${rawFactCount} kept×${facts.length} dropped×${outcome.factsDropped} capped×${Math.max(0, rawFactCount - facts.length)}`);
+        }
         if (session.sessionId) {
             const meta = getEngine().repository.getBankMeta(this.bankIdForSessionId(session.sessionId, session.agentName));
             if (meta) {
@@ -212,17 +232,53 @@ export class MemoryService {
             globalEnabled: configBool('EXTRACT_GLOBAL', false),
             personalFromGroup: configBool('EXTRACT_PERSONAL_FROM_GROUP', false),
         });
-        const reply = await getAuxLlm().chat('summarize_agent', prompt);
+        const reply = await getAuxLlm().chat('summarize_agent', prompt, { throwClassified: true });
         const data = safeJson(reply);
         if (!data || !Array.isArray(data.facts)) throw new Error('extract_invalid_json');
         return data.facts;
     }
 
-    private static async applyFact(session: Session, fact: any, source: 'ai' | 'archive' | 'manual'): Promise<{ added: number; invalidated: number; dropped: boolean; banks: string[]; tags: string[] }> {
+    /**
+     * 归档段 facts 写库（P0-4）：上下文层通过 L0 sink 调到这里。
+     * 不调用 getSessionById（会对未知 id 造幽灵会话）；applyFact 只需要 sessionId/agentName。
+     * @returns 本次写入触及的 bankId（供调度器排巩固）
+     */
+    static async applyExtractedFacts(
+        sessionId: string,
+        agentName: string,
+        facts: unknown[],
+        source: 'ai' | 'archive' | 'manual' = 'archive',
+    ): Promise<string[]> {
+        if (!configBool('MEMORY_ENABLED', true)) return [];
+        if (!configBool('EXTRACT_ENABLED', true)) return [];
+        const ref: SessionRef = { sessionId, agentName };
+        const touched = new Set<string>();
+        for (const fact of Array.isArray(facts) ? facts : []) {
+            const applied = await this.applyFact(ref, fact, source, { deferSave: true });
+            for (const bank of applied.banks) touched.add(bank);
+        }
+        const repo = getEngine().repository;
+        for (const bank of touched) repo.save(bank, ['units', 'links', 'obs', 'meta']);
+        if (touched.size) bumpMemoryRevision();
+        return Array.from(touched);
+    }
+
+    private static async applyFact(
+        session: SessionRef,
+        fact: any,
+        source: 'ai' | 'archive' | 'manual',
+        opts: { deferSave?: boolean } = {},
+    ): Promise<{ added: number; invalidated: number; dropped: boolean; banks: string[]; tags: string[] }> {
         const text = String(fact?.text || '').trim();
         if (!text) return { added: 0, invalidated: 0, dropped: true, banks: [], tags: [] };
         const op = fact.op === 'update' ? 'update' : fact.op === 'delete' ? 'delete' : fact.op === 'noop' ? 'noop' : 'add';
         if (op === 'noop') return { added: 0, invalidated: 0, dropped: true, banks: [], tags: [] };
+        const importance = Number.isFinite(Number(fact.importance)) ? Number(fact.importance) : 0.5;
+        // P1-2 降噪：低于阈值的事实直接丢弃（默认 0=不启用；不可逆，灰度用）
+        const minImportance = configFloat('EXTRACT_MIN_IMPORTANCE', 0);
+        if (op === 'add' && minImportance > 0 && importance < minImportance) {
+            return { added: 0, invalidated: 0, dropped: true, banks: [], tags: [] };
+        }
         const memoryType = fact.memory_type === 'global' ? 'global' : fact.memory_type === 'group' ? 'group' : 'private';
         const isPrivateSession = !/-Group:/.test(session.sessionId);
         const platform = session.sessionId.split(':')[0] || '';
@@ -240,9 +296,9 @@ export class MemoryService {
             if (!configBool('EXTRACT_GLOBAL', false)) return { added: 0, invalidated: 0, dropped: true, banks: [], tags: [] };
             if (isPrivateSession || conf < 0.6 || containsUserRef(text)) return { added: 0, invalidated: 0, dropped: true, banks: [], tags: [] };
             kind = 'global';
-            bankId = this.globalBankId(session.agentName);
+            bankId = this.globalBankId(session.agentName || '*');
             vis = 'public';
-            tags.push(`global:${globalScopeName(session.agentName)}`);
+            tags.push(`global:${globalScopeName(session.agentName || '*')}`);
         } else if (memoryType === 'group') {
             kind = 'group';
             const target = normalizeGroupId(fact.target_id, platform) || (/-Group:/.test(session.sessionId) ? session.sessionId : '');
@@ -288,7 +344,7 @@ export class MemoryService {
             ...keywords,
         ]);
         const repo = getEngine().repository;
-        repo.getOrCreateBank(bankId, kind, session.agentName);
+        repo.getOrCreateBank(bankId, kind, session.agentName || '');
 
         if (op === 'delete' || op === 'update') {
             const existingId = String(fact.existing_id || '');
@@ -322,7 +378,9 @@ export class MemoryService {
             factType: fact.type === 'event' ? 'experience' : 'world',
             entities: Array.isArray(fact.entities) ? fact.entities.map(String) : [],
             occurredStart: parseOccurredAt(fact.occurred_at),
-            importance: typeof fact.importance === 'number' ? fact.importance : 0.5,
+            importance,
+            skipConsolidation: op === 'add' && fact.type === 'event' && configBool('EXTRACT_EVENT_SKIP_CONSOLIDATION', false),
+            deferSave: opts.deferSave === true,
         });
         for (const relatedId of Array.isArray(fact.related_memory_ids) ? fact.related_memory_ids : []) {
             const from = result.unitIds[0];
@@ -332,7 +390,7 @@ export class MemoryService {
         if (bank) {
             for (const obs of bank.observations) obs.proofCount = distinctLiveEvidence(bank, obs.evidence);
         }
-        repo.save(bankId, ['units', 'links', 'obs', 'meta']);
+        if (!opts.deferSave) repo.save(bankId, ['units', 'links', 'obs', 'meta']);
         return { added: result.action === 'added' ? 1 : 0, invalidated: op === 'update' ? 1 : 0, dropped: false, banks: [bankId], tags: finalTags };
     }
 
@@ -396,7 +454,11 @@ export class MemoryService {
         const repo = getEngine().repository;
         const obs = repo.listObservations(bankId);
         for (const o of obs) repo.deleteObservation(bankId, o.id);
-        for (const unit of repo.listUnits(bankId)) unit.consolidationState = 'pending';
+        // skip 事实（P1-2 事件类）保持 done，不因清观察被重新拉回巩固队列
+        for (const unit of repo.listUnits(bankId)) {
+            if (unit.metadata?.skipConsolidation === '1') continue;
+            unit.consolidationState = 'pending';
+        }
         repo.setPendingCount(bankId);
         repo.save(bankId, ['units', 'obs', 'meta']);
         bumpSummaryRevision();
@@ -431,8 +493,14 @@ export class MemoryService {
         return getEngine().recall(bankId, { query, ...options });
     }
 
+    /** P1-1：单次巩固默认处理条数（不新增配置；需要调参时再提为配置） */
+    static readonly DEFAULT_CONSOLIDATE_MAX_FACTS = 20;
+
     static async consolidateBank(bankId: string, opts: { maxFacts?: number; targetedTags?: string[] } = {}): Promise<ConsolidateOutcome> {
-        const result = await getEngine().consolidate(bankId, opts);
+        const result = await getEngine().consolidate(bankId, {
+            ...opts,
+            maxFacts: opts.maxFacts ?? MemoryService.DEFAULT_CONSOLIDATE_MAX_FACTS,
+        });
         if (result.created.length || result.updated.length || result.merged.length) bumpSummaryRevision();
         return result;
     }
@@ -722,6 +790,10 @@ function configBool(key: string, fallback: boolean): boolean {
     return typeof value === 'boolean' ? value : fallback;
 }
 function configInt(key: string, fallback: number): number {
+    const value = (Config.memory as unknown as Record<string, unknown>)[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+function configFloat(key: string, fallback: number): number {
     const value = (Config.memory as unknown as Record<string, unknown>)[key];
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }

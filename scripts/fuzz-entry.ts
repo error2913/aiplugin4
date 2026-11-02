@@ -71,7 +71,14 @@ svc.agentName = 'default';
     return s;
 };
 Agent.get = ((name: string) => {
-    if (name === 'summarize_agent') return { chat: async () => '{"facts":[]}' };
+    if (name === 'summarize_agent') {
+        return {
+            chat: async (prompt: string) => {
+                if (String(prompt || '').includes('[New conversation segment]')) return '{"summary":"模拟滚动摘要","facts":[]}';
+                return '{"facts":[]}';
+            },
+        };
+    }
     return { sessionService: svc, chat: async () => '回复' };
 }) as any;
 (MemoryManager as any).summarizeChunkWithRetry = async () => true;

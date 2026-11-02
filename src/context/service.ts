@@ -2,6 +2,7 @@
 // 上层（Session/Agent/命令/工具/子代理）通过这里写入、取投影、编译请求、召回、压缩；
 // 不直接碰 store/page 细节。
 import {
+    ArchiveDraft,
     CompactDeps,
     compactOnce,
     CompactOptions,
@@ -227,15 +228,93 @@ export class ContextService {
 
     /** 一次压缩；成功会写入内存记录，需 flush 持久化 */
     async compact(options: CompactOptions, deps: CompactDeps): Promise<CompactResult> {
+        const replayed = await this.replayArchiveDraft(deps);
+        if (replayed) return replayed;
         const result = await compactOnce({
             events: this.store.snapshot().events,
             records: this.store.snapshot().records,
             head: this.store.getHead(),
         }, options, deps);
         if (result.advanced && result.record) {
-            this.store.commitSummary(result.record, result.through, result.unsummarizedTokens);
+            const facts = Array.isArray(result.facts) ? result.facts : [];
+            const info = { epoch: result.record.epoch, fromSeq: result.record.fromSeq, toSeq: result.record.toSeq };
+            if (facts.length > 0 && deps.applyFacts) {
+                const draft: ArchiveDraft = {
+                    info,
+                    summaryText: result.record.text,
+                    recordId: result.record.id,
+                    at: result.record.at,
+                    fromAt: result.record.fromAt,
+                    toAt: result.record.toAt,
+                    unsummarizedTokens: result.unsummarizedTokens,
+                    facts,
+                    applied: false,
+                };
+                // 两阶段：先落草稿 → 提交摘要 → 写 facts；facts 失败时草稿留待重放（不阻塞归档）
+                deps.saveArchiveDraft?.(draft);
+                this.store.commitSummary(result.record, result.through, result.unsummarizedTokens);
+                try {
+                    await deps.applyFacts(facts, info);
+                    draft.applied = true;
+                    deps.saveArchiveDraft?.(draft);
+                    deps.clearArchiveDraft?.();
+                } catch { /* 保留草稿，下一次 compact 入口重放 */ }
+            } else {
+                this.store.commitSummary(result.record, result.through, result.unsummarizedTokens);
+            }
         }
         return result;
+    }
+
+    /**
+     * 两阶段草稿重放：崩溃/写库失败后不重调 LLM，用同一 payload 补提交摘要 + 补写 facts。
+     * @returns 重放结果（没有草稿返回 null）
+     */
+    private async replayArchiveDraft(deps: CompactDeps): Promise<CompactResult | null> {
+        const draft = deps.loadArchiveDraft?.();
+        if (!draft) return null;
+        const head = this.store.getHead();
+        if (draft.info.toSeq > head.summarizedThrough) {
+            this.store.commitSummary({
+                id: draft.recordId,
+                at: draft.at,
+                kind: 'summary',
+                epoch: draft.info.epoch,
+                fromSeq: draft.info.fromSeq,
+                toSeq: draft.info.toSeq,
+                text: draft.summaryText,
+                fromAt: draft.fromAt,
+                toAt: draft.toAt,
+            }, draft.info.toSeq, draft.unsummarizedTokens);
+        }
+        if (deps.applyFacts && !draft.applied) {
+            try {
+                await deps.applyFacts(draft.facts, draft.info);
+                draft.applied = true;
+                deps.saveArchiveDraft?.(draft);
+            } catch {
+                // 继续保留草稿；本次按已推进返回，runtime 会 flush 已提交的摘要
+                return {
+                    advanced: true,
+                    record: null,
+                    through: draft.info.toSeq,
+                    unsummarizedTokens: draft.unsummarizedTokens,
+                    batch: null,
+                    inputChars: 0,
+                    truncated: false,
+                };
+            }
+        }
+        deps.clearArchiveDraft?.();
+        return {
+            advanced: true,
+            record: null,
+            through: draft.info.toSeq,
+            unsummarizedTokens: draft.unsummarizedTokens,
+            batch: null,
+            inputChars: 0,
+            truncated: false,
+        };
     }
 
     async flush(): Promise<Awaited<ReturnType<ContextStore['flush']>>> {

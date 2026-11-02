@@ -58,8 +58,7 @@ export function registerCmdCtx() {
                 const fresh = ContextService.openSync(sid, { estimateEventTokens: storeEstimate });
                 session.contextV2 = fresh;
                 session.context.initV2(fresh);
-                // purge = 新 context epoch：重置本会话自动摘要额度（最多一次）；必须在 save 前赋值
-                session.ctxAutoSummaryUsed = 0;
+                session.ctxAutoSummaryBlockedUntil = 0;
                 session.save();
             } catch {
                 session.contextV2 = null;

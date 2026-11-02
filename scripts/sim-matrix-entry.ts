@@ -66,7 +66,14 @@ const noopAgent = {
     chat: async () => '（模拟回复）',
 };
 Agent.get = ((name: string) => {
-    if (name === 'summarize_agent') return { chat: async () => '{"facts":[]}' };
+    if (name === 'summarize_agent') {
+        return {
+            chat: async (prompt: string) => {
+                if (String(prompt || '').includes('[New conversation segment]')) return '{"summary":"模拟滚动摘要","facts":[]}';
+                return '{"facts":[]}';
+            },
+        };
+    }
     return noopAgent;
 }) as any;
 

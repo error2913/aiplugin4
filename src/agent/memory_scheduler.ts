@@ -1,14 +1,13 @@
-// 记忆调度器：持久化队列 + 门控（无 AI 不跑、在线让路、预算/熔断）+ 重载恢复。
+// 记忆调度器：持久化队列 + 门控（无 AI 不跑、在线让路、熔断）+ 重载恢复。
 import Config from "../config/config";
 import { getHost } from "../core/host";
-import { getSessionById } from "../core/ports/session_lookup";
 import { MemoryService, setMentalModelSeedHook } from "../memory/service";
+import { classifyAuxError, isClassifiedApiError } from "../model/api_error";
+import { isAuxPaused, noteFatalAuxError, trySwitchSummarizationModel } from "../model/aux_breaker";
 import type { Session } from "../session/session";
 import { requestLimiter } from "../utils/concurrency";
 
-import { collectContextBacklog, commitExtraction, peekExtractionChunk } from "./context_bridge";
-
-export type JobKind = 'extract' | 'consolidate' | 'mm_refresh' | 'mm_full';
+export type JobKind = 'consolidate' | 'mm_refresh' | 'mm_full';
 export type JobSource = 'ai' | 'archive' | 'manual' | 'seed';
 export type JobState = 'queued' | 'running' | 'backoff' | 'dead' | 'degraded';
 
@@ -23,7 +22,7 @@ export interface MemoryJob {
     state: JobState;
     notBefore: number;
     attempts: number;
-    payload?: { throughSeq?: number; textLength?: number; scopeTags?: string[]; deferSince?: number; force?: boolean };
+    payload?: { scopeTags?: string[]; deferSince?: number; force?: boolean; pages?: number };
     createdAt: number;
 }
 
@@ -33,7 +32,6 @@ interface SchedulerState {
     running: string | null;
     lastTickAt: number;
     lastAiActivityAt: number;
-    hourly: { windowStart: number; llmCalls: number };
     failureStreak: number;
     pausedUntil: number;
 }
@@ -58,7 +56,6 @@ function emptyState(): SchedulerState {
         running: null,
         lastTickAt: 0,
         lastAiActivityAt: 0,
-        hourly: { windowStart: 0, llmCalls: 0 },
         failureStreak: 0,
         pausedUntil: 0,
     };
@@ -74,12 +71,18 @@ function load(): void {
         if (!raw) return;
         const parsed = JSON.parse(raw) as Partial<SchedulerState>;
         if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.jobs)) return;
+        // 显式字段重建：丢弃旧版本遗留字段（如 hourly），并过滤已下线的 extract job
         state = {
             ...emptyState(),
-            ...parsed,
-            jobs: parsed.jobs.filter(Boolean).map(j => ({ ...j, state: j.state === 'running' ? 'queued' : j.state })),
+            jobs: parsed.jobs
+                .filter(Boolean)
+                .filter(j => (j as { kind: string }).kind !== 'extract')
+                .map(j => ({ ...j, state: j.state === 'running' ? 'queued' : j.state })),
             running: null,
             lastAiActivityAt: 0,
+            lastTickAt: Number(parsed.lastTickAt) || 0,
+            failureStreak: Number(parsed.failureStreak) || 0,
+            pausedUntil: Number(parsed.pausedUntil) || 0,
         } as SchedulerState;
     } catch {
         state = emptyState();
@@ -160,20 +163,15 @@ function runnable(now: number): MemoryJob[] {
         .sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
 }
 
-function takeBudget(): boolean {
-    const now = nowSec();
-    if (!state.hourly.windowStart || now - state.hourly.windowStart >= 3600) {
-        state.hourly = { windowStart: now, llmCalls: 0 };
-    }
-    if (state.hourly.llmCalls >= hourlyLimit()) return false;
-    state.hourly.llmCalls++;
-    save();
-    return true;
-}
-
 function chatBusy(): boolean {
     const info = requestLimiter.getQueueInfo();
     return info.active > 0 || info.queued > 0;
+}
+
+/** aux 模型未配置（Agent.chat 抛的固定错误）：不值得重试，标记 degraded 丢弃。 */
+function isAuxUnavailable(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    return message === 'aux_llm_unavailable';
 }
 
 export class MemoryScheduler {
@@ -200,28 +198,27 @@ export class MemoryScheduler {
         if (!session || session.headless || (session as any).subagentDepth > 0) return;
         activeAiRuns = Math.max(0, activeAiRuns - 1);
         try {
-            collectContextBacklog(session);
             state.lastAiActivityAt = nowSec();
             save();
             if (!configBool('MEMORY_ENABLED', true)) return;
-            if (!configBool('EXTRACT_ENABLED', true)) return;
             const bankId = MemoryService.bankIdForSessionId(session.sessionId, session.agentName);
-            const chunk = peekExtractionChunk(session);
-            if (chunk) {
-                enqueue({
-                    kind: 'extract',
-                    bankId,
-                    sessionId: session.sessionId,
-                    source: 'ai',
-                    priority: 1,
-                    payload: { throughSeq: chunk.throughSeq, textLength: chunk.textLength },
-                });
-            }
-            // 兜底 reconcile：上次巩固未完成/进程中断时，下一次 AI 触发继续
+            // 兜底 reconcile：上次巩固未完成/进程中断时，下一次 AI 触发继续。
+            // 抽取已并入归档（context/compact），这里不再入队 extract。
             if (MemoryService.pendingCount(bankId) > 0) {
                 enqueue({ kind: 'consolidate', bankId, source: 'ai', priority: 2 });
             }
         } catch { /* ignore */ }
+    }
+
+    /** 归档 facts 写库后调用：把触及的 bank 排入巩固队列（跨 bank 也覆盖）。 */
+    static enqueueConsolidate(bankId: string, source: JobSource = 'archive', priority: 0 | 1 | 2 | 3 = 2): void {
+        if (!bankId) return;
+        enqueue({ kind: 'consolidate', bankId, source, priority });
+    }
+
+    /** 外部（归档 sink）触发调度循环：不等待执行。 */
+    static wake(): void {
+        ensureRunning();
     }
 
     /** 手动命令/工具：入队并立刻尝试（不等待）。 */
@@ -237,11 +234,10 @@ export class MemoryScheduler {
         save();
     }
 
-    static status(): { jobs: number; running: string | null; hourlyCalls: number; pausedUntil: number; lastAiActivityAt: number } {
+    static status(): { jobs: number; running: string | null; pausedUntil: number; lastAiActivityAt: number } {
         return {
             jobs: state.jobs.length,
             running: state.running,
-            hourlyCalls: state.hourly.llmCalls,
             pausedUntil: state.pausedUntil,
             lastAiActivityAt: state.lastAiActivityAt,
         };
@@ -269,6 +265,8 @@ export class MemoryScheduler {
     static async tick(now = nowSec()): Promise<boolean> {
         if (state.running) return false;
         if (state.pausedUntil > now) return false;
+        // 进程级 aux 熔断（余额/鉴权类错误）期间不发起任何后台 aux 调用
+        if (isAuxPaused()) return false;
         const jobs = runnable(now);
         if (!jobs.length) return false;
         const job = jobs[0];
@@ -287,12 +285,6 @@ export class MemoryScheduler {
                 return false;
             }
         }
-        if (job.priority > 0 && !takeBudget()) {
-            job.notBefore = now + 60;
-            save();
-            ensureRunning();
-            return false;
-        }
         state.running = job.id;
         job.state = 'running';
         save();
@@ -301,19 +293,45 @@ export class MemoryScheduler {
             state.jobs = state.jobs.filter(j => j.id !== job.id);
             state.failureStreak = 0;
         } catch (error) {
-            job.attempts++;
+            // 分类错误优先：fatal 立即熔断（不重试、不累加 attempts）；retry 走退避；
+            // 其余（JSON 坏/无模型等）保持原有 degraded/dead 语义。
+            if (isClassifiedApiError(error)) {
+                const cls = classifyAuxError(error.kind);
+                if (cls === 'fatal') {
+                    noteFatalAuxError(error.kind, error.message);
+                    trySwitchSummarizationModel();
+                    state.pausedUntil = Math.max(state.pausedUntil, now + BREAKER_SEC);
+                    job.state = 'queued';
+                    job.notBefore = now + BREAKER_SEC;
+                    save();
+                    return false;
+                }
+                if (cls === 'retry') {
+                    job.attempts++;
+                    job.state = 'backoff';
+                    job.notBefore = now + Math.min(60, Math.pow(2, job.attempts - 1));
+                    save();
+                    return false;
+                }
+            }
             const message = error instanceof Error ? error.message : String(error);
-            if (/json|parse|invalid|no facts/i.test(message)) {
+            if (isAuxUnavailable(error)) {
                 job.state = 'degraded';
                 state.jobs = state.jobs.filter(j => j.id !== job.id);
-            } else if (job.attempts >= MAX_ATTEMPTS) {
-                job.state = 'dead';
+            } else if (/^extract_invalid_json$/i.test(message)) {
+                job.state = 'degraded';
                 state.jobs = state.jobs.filter(j => j.id !== job.id);
-                state.failureStreak++;
-                if (state.failureStreak >= 3) state.pausedUntil = now + BREAKER_SEC;
             } else {
-                job.state = 'backoff';
-                job.notBefore = now + Math.min(60, Math.pow(2, job.attempts - 1));
+                job.attempts++;
+                if (job.attempts >= MAX_ATTEMPTS) {
+                    job.state = 'dead';
+                    state.jobs = state.jobs.filter(j => j.id !== job.id);
+                    state.failureStreak++;
+                    if (state.failureStreak >= 3) state.pausedUntil = now + BREAKER_SEC;
+                } else {
+                    job.state = 'backoff';
+                    job.notBefore = now + Math.min(60, Math.pow(2, job.attempts - 1));
+                }
             }
         } finally {
             state.running = null;
@@ -327,29 +345,23 @@ export class MemoryScheduler {
 
 async function run(job: MemoryJob): Promise<void> {
     if (!configBool('MEMORY_ENABLED', true)) return;
-    if (job.kind === 'extract') {
-        if (!configBool('EXTRACT_ENABLED', true)) return;
-        const session = job.sessionId ? getSessionById(job.sessionId) : null;
-        if (!session) return;
-        for (let i = 0; i < 2; i++) {
-            const chunk = peekExtractionChunk(session);
-            if (!chunk) break;
-            const outcome = await MemoryService.extractFromChunk(session, chunk, job.source === 'manual' ? 'manual' : 'ai');
-            commitExtraction(session, chunk.throughSeq, chunk.textLength);
-            for (const bankId of outcome.touchedBanks) {
-                enqueue({ kind: 'consolidate', bankId, source: job.source === 'manual' ? 'manual' : 'ai', priority: 2 });
-            }
-        }
-        if (peekExtractionChunk(session)) {
-            enqueue({ kind: 'extract', bankId: job.bankId, sessionId: job.sessionId, source: job.source, priority: 1 });
-        }
-        return;
-    }
     if (job.kind === 'consolidate') {
         if (!configBool('OBSERVATION_ENABLED', true)) return;
         const outcome = await MemoryService.consolidateBank(job.bankId);
         if (configBool('MM_REFRESH_AFTER_CONSOLIDATION', false) && outcome.touchedTags.length) {
             enqueue({ kind: 'mm_refresh', bankId: job.bankId, source: 'ai', priority: 3, payload: { scopeTags: outcome.touchedTags } });
+        }
+        // 有界自续队：一次最多连续 2 页（pages），避免无上限连发
+        const pages = job.payload?.pages ?? 0;
+        if (outcome.pendingRemaining > 0 && pages < 2) {
+            enqueue({
+                kind: 'consolidate',
+                bankId: job.bankId,
+                source: job.source === 'manual' ? 'manual' : 'ai',
+                priority: 3,
+                notBefore: nowSec() + 30,
+                payload: { pages: pages + 1 },
+            });
         }
         return;
     }
@@ -367,16 +379,6 @@ async function run(job: MemoryJob): Promise<void> {
 function configBool(key: string, fallback: boolean): boolean {
     const value = (Config.memory as unknown as Record<string, unknown>)[key];
     return typeof value === 'boolean' ? value : fallback;
-}
-
-function configInt(key: string, fallback: number): number {
-    const value = (Config.memory as unknown as Record<string, unknown>)[key];
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function hourlyLimit(): number {
-    const value = configInt('BACKGROUND_HOURLY_LLM_CAP', 20);
-    return value > 0 ? value : 20;
 }
 
 // 兼容旧测试/诊断

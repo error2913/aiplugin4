@@ -15,10 +15,12 @@ import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
 import { getHost, setHost } from "./core/host";
+import { setArchiveFactsSink } from "./core/ports/archive_facts";
 import { createSealHost } from "./core/seal_host";
 import { logger } from "./logger";
 import { MediaTaskManager } from "./media/task_queue";
 import { knowledgeService } from "./memory/knowledge";
+import { MemoryService } from "./memory/service";
 import { MessagePipeline } from "./pipeline";
 import { reconcileRuleTimers } from "./pipeline/trigger_timer_impl";
 import { installPromptMemorySource } from "./prompt/memory_source_impl";
@@ -66,6 +68,13 @@ function main() {
   reconcileRuleTimers();
   TimerManager.start();
   MemoryScheduler.init();
+  // 归档 facts → 记忆层（context 不 import memory，经 L0 端口接线），并排巩固
+  setArchiveFactsSink(async input => {
+    const banks = await MemoryService.applyExtractedFacts(input.sessionId, input.agentName, input.facts, 'archive');
+    for (const bank of banks) MemoryScheduler.enqueueConsolidate(bank);
+    MemoryScheduler.wake();
+    return banks;
+  });
   MediaTaskManager.init();
   ImageGC.init();
   knowledgeService.init();

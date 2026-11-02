@@ -87,7 +87,15 @@ const origGet = Agent.get;
 Agent.get = ((name: string) => {
     if (name === 'summarize_agent') {
         return {
-            chat: async () => { llm.calls++; llm.byUse['summarization'] = (llm.byUse['summarization'] || 0) + 1; return '{"facts":[]}'; },
+            chat: async (prompt: string) => {
+                llm.calls++;
+                llm.byUse['summarization'] = (llm.byUse['summarization'] || 0) + 1;
+                // 归档合并调用（P0-4）需要 {summary, facts}；普通抽取仍是 {facts}
+                if (String(prompt || '').includes('[New conversation segment]')) {
+                    return '{"summary":"模拟滚动摘要","facts":[]}';
+                }
+                return '{"facts":[]}';
+            },
         };
     }
     return fakeAgent;

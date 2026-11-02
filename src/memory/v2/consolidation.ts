@@ -1,5 +1,6 @@
 // 观察巩固：pending facts → 观察（evidence / proofCount / history）。
 // 不物理删除过期观察；不在本层调用 LLM 之外的副作用。
+import { isClassifiedApiError } from "../../model/api_error";
 import { generateId } from "../../utils/id";
 
 import type { MemoryRepository } from "./repository";
@@ -10,12 +11,18 @@ import type {
     MemoryUnit,
     Observation,
     ObservationDecision,
+    ObservationDecisionBatchMaker,
+    ObservationDecisionInput,
     ObservationDecisionMaker,
 } from "./types";
+
+/** P0-1：一次请求最多判定多少个 cluster（写死，与单次巩固 20 条对齐 → 1 job = 1 call） */
+const OBSERVATION_DECISION_BATCH_SIZE = 20;
 
 export interface ConsolidationHost {
     repository: MemoryRepository;
     decideObservation?: ObservationDecisionMaker;
+    decideObservationBatch?: ObservationDecisionBatchMaker;
     synthesizeObservation?: (quotes: string[]) => Promise<string>;
 }
 
@@ -29,11 +36,12 @@ export async function doConsolidate(
     const empty: ConsolidateOutcome = { created: [], updated: [], merged: [], skipped: 0, touchedTags: [], pendingRemaining: 0 };
     if (!bank) return empty;
 
-    let pending = repo.listPendingFacts(bankId, opts.maxFacts ?? 50);
-    if (opts.targetedTags && opts.targetedTags.length) {
-        const scope = new Set(opts.targetedTags);
-        pending = pending.filter(f => f.tags.some(t => scope.has(t)));
-    }
+    const limit = opts.maxFacts ?? 50;
+    const all = repo.listPendingFacts(bankId, Infinity);
+    const scoped = opts.targetedTags && opts.targetedTags.length
+        ? (() => { const scope = new Set(opts.targetedTags); return all.filter(f => f.tags.some(t => scope.has(t))); })()
+        : all;
+    const pending = pickPending(scoped, limit);
     if (pending.length === 0) return { ...empty, pendingRemaining: countPending(bank.units) };
 
     const clusters = clusterFacts(pending);
@@ -43,41 +51,61 @@ export async function doConsolidate(
     const touched = new Set<string>();
     const processed: string[] = [];
 
-    for (const cluster of clusters) {
-        const evidenceTexts = cluster.map(f => f.text);
-        const related = findRelatedObservations(bank.observations, cluster);
-        let decision: ObservationDecision | null = null;
-        if (host.decideObservation) {
-            decision = await host.decideObservation({
-                evidence: evidenceTexts,
-                existing: related,
-                tags: unionTags(cluster),
-            });
-        }
-        if (!decision) {
-            const text = host.synthesizeObservation
-                ? await host.synthesizeObservation(evidenceTexts)
-                : evidenceTexts.join('；');
-            decision = related.length
-                ? { action: 'refine', targetId: related[0].id, text, evidenceMemoryIds: cluster.map(f => f.id) }
-                : { action: 'create', text, evidenceMemoryIds: cluster.map(f => f.id) };
-        }
+    const applyCluster = (cluster: MemoryUnit[], decision: ObservationDecision): void => {
         applyDecision(host, bankId, cluster, decision, { created, updated, merged });
         for (const fact of cluster) {
             touched.add(fact.tags.find(t => /^(user|group|global):/.test(t)) || '');
             processed.push(fact.id);
         }
-    }
+    };
 
-    if (processed.length) {
-        repo.markConsolidated(bankId, processed);
-        const now = Math.floor(Date.now() / 1000);
-        const meta = repo.getBankMeta(bankId);
-        if (meta) {
-            meta.settings.lastConsolidateAt = now;
-            repo.setPendingCount(bankId);
+    try {
+        for (let start = 0; start < clusters.length; start += OBSERVATION_DECISION_BATCH_SIZE) {
+            const batch = clusters.slice(start, start + OBSERVATION_DECISION_BATCH_SIZE);
+            const inputs: ObservationDecisionInput[] = batch.map(cluster => ({
+                evidence: cluster.map(f => f.text),
+                existing: findRelatedObservations(bank.observations, cluster),
+                tags: unionTags(cluster),
+            }));
+
+            let decisions: Array<ObservationDecision | null> = batch.map(() => null);
+            if (host.decideObservationBatch) {
+                try {
+                    const out = await host.decideObservationBatch(inputs);
+                    decisions = batch.map((_, i) => out[i] ?? null);
+                } catch (e) {
+                    // 任何分类 API 错误整批上抛：限流时逐条重发 = 1→N 连发
+                    if (isClassifiedApiError(e)) throw e;
+                    decisions = batch.map(() => null);
+                }
+            }
+
+            for (let i = 0; i < batch.length; i++) {
+                const input = inputs[i];
+                let raw: ObservationDecision | null = decisions[i] ?? null;
+                if (!raw && host.decideObservation) {
+                    raw = await host.decideObservation(input);   // 只补缺失项；抛错则上抛
+                }
+                const decision = raw
+                    ? normalizeDecision(raw, batch[i], input.existing)
+                    : { action: 'create' as const, evidenceMemoryIds: batch[i].map(f => f.id) };
+                applyCluster(batch[i], decision);
+            }
         }
-        repo.save(bankId, ['units', 'obs', 'meta']);
+    } finally {
+        // 任何异常中途中断，都要把已判定的 cluster 落盘，避免「观察已建、事实仍 pending」
+        try {
+            if (processed.length) {
+                repo.markConsolidated(bankId, processed);
+                const now = Math.floor(Date.now() / 1000);
+                const meta = repo.getBankMeta(bankId);
+                if (meta) {
+                    meta.settings.lastConsolidateAt = now;
+                    repo.setPendingCount(bankId);
+                }
+                repo.save(bankId, ['units', 'obs', 'meta']);
+            }
+        } catch { /* 不得掩盖原异常 */ }
     }
 
     return {
@@ -90,8 +118,49 @@ export async function doConsolidate(
     };
 }
 
+const DECISION_ACTIONS = new Set(['create', 'reinforce', 'refine', 'contradict', 'merge', 'noop']);
+
+/**
+ * cluster 级校验：targetId 必须属于本 cluster 的 existing；evidenceMemoryIds 必须属于本 cluster。
+ * 无效 target 的 reinforce/refine/contradict/merge 退化为 create（防串写）。
+ */
+function normalizeDecision(raw: ObservationDecision, cluster: MemoryUnit[], related: Observation[]): ObservationDecision {
+    const action = DECISION_ACTIONS.has(raw.action) ? raw.action : 'create';
+    const clusterIds = new Set(cluster.map(f => f.id));
+    const relatedIds = new Set(related.map(o => o.id));
+    const evidence = Array.isArray(raw.evidenceMemoryIds)
+        ? raw.evidenceMemoryIds.map(String).filter(id => clusterIds.has(id))
+        : undefined;
+    const text = typeof raw.text === 'string' ? raw.text.slice(0, 400) : undefined;
+    const targetId = typeof raw.targetId === 'string' && relatedIds.has(raw.targetId) ? raw.targetId : undefined;
+    const needsTarget = action === 'reinforce' || action === 'refine' || action === 'contradict' || action === 'merge';
+    const finalAction = needsTarget && !targetId ? 'create' : action;
+    return {
+        action: finalAction,
+        targetId: finalAction === 'create' ? undefined : targetId,
+        text,
+        ...(evidence && evidence.length ? { evidenceMemoryIds: evidence } : {}),
+    } as ObservationDecision;
+}
+
 function countPending(units: MemoryUnit[]): number {
     return units.filter(u => u.state === 'valid' && u.consolidationState === 'pending').length;
+}
+
+/**
+ * P1-1 混合取数：最老的一半 + 重要度最高的一半（同分按入库序）。
+ * 取完仍按 createdAtSeq 升序应用，保证同一主题的先后。
+ * 目的：单 job 有界，同时避免低重要度事实被无限饿死。
+ */
+function pickPending(all: MemoryUnit[], limit: number): MemoryUnit[] {
+    if (all.length <= limit) return all.slice();
+    const oldestCount = Math.ceil(limit / 2);
+    const oldest = all.slice(0, oldestCount);
+    const chosen = new Set(oldest.map(f => f.id));
+    const rest = all.filter(f => !chosen.has(f.id))
+        .sort((a, b) => (b.importance - a.importance) || (a.createdAtSeq - b.createdAtSeq));
+    return oldest.concat(rest.slice(0, limit - oldest.length))
+        .sort((a, b) => a.createdAtSeq - b.createdAtSeq);
 }
 
 function clusterFacts(facts: MemoryUnit[]): MemoryUnit[][] {

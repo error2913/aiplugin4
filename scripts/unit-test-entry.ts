@@ -43,6 +43,7 @@ import { registerCmdMemory, resolveMmAddOptions } from "../src/cmd/sub_cmd/memor
 import { getPlatform, isGroupId, makeGroupId, makeUserId, normalizeGroupId, normalizeTargetId, normalizeUserId, platformOf } from "../src/utils/target_id";
 import { MemoryManager, parseOccurredAt } from "../src/memory/manager";
 import { MemoryService, SECTION_RECALL_MAX_TOKENS, setMemoryEngineFactory } from "../src/memory/service";
+import { resetAuxBreaker } from "../src/model/aux_breaker";
 import { canReadByTags } from "../src/memory/v2/access";
 import { applyDeltaOps, parseMarkdown, blockSnapshot } from "../src/memory/v2/structured";
 import { migrateBankV3 } from "../src/memory/v2/migrate_v3";
@@ -2834,14 +2835,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(activeTimeSegmentIndex({ start: 0, end: 0, segs: 0 }, new Date(2026, 0, 1, 10, 0)), -1, '未配置活跃时段返回 -1');
     },
 
-    /** 会话持久化契约：运行时字段不落盘、挂起队列只留轻量字段、节流边界、自动摘要额度持久化 */
+    /** 会话持久化契约：运行时字段不落盘、挂起队列只留轻量字段、节流边界 */
     testSessionPersistenceContract(): void {
         const session = new Session();
         session.sessionId = 'QQ:persist';
         session.setting.aiEnabled = true;
         session.running = true;
-        session.ctxAutoSummaryUsed = 1;
         session.ctxAutoSummaryInFlight = true;
+        session.ctxAutoSummaryBlockedUntil = Date.now() + 1000;
         session.pendingQueue.push({ ctx: {} as any, msg: {} as any, content: '你好', userId: 'QQ:1', messageId: 'm1', kind: 'record', epId: 'ep1', isPrivate: false });
         const raw = serializeSession(session);
         const data = JSON.parse(raw);
@@ -2850,17 +2851,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
             assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
         }
-        // 自动摘要额度必须持久化（重启后不白送一次）；在飞标记只在运行期
-        assert.equal(data.ctxAutoSummaryUsed, 1, '自动摘要额度应持久化');
+        // 归档在飞标记与 missing-history 冷却只在运行期（不持久化）
         assert.ok(!('ctxAutoSummaryInFlight' in data), '在飞标记不应落盘');
+        assert.ok(!('ctxAutoSummaryBlockedUntil' in data), '归档冷却不应落盘');
         const revived = revive(Session, data) as Session;
-        assert.equal(revived.ctxAutoSummaryUsed, 1, '重启恢复后额度仍为已用');
         assert.equal(revived.ctxAutoSummaryInFlight, false, '在飞标记重载后回 false');
-        // 旧会话没有该字段：revive 缺省 0（不因升级白送/误判）
-        const oldRaw = JSON.parse(raw);
-        delete oldRaw.ctxAutoSummaryUsed;
-        const revivedOld = revive(Session, oldRaw) as Session;
-        assert.equal(revivedOld.ctxAutoSummaryUsed, 0, '旧会话缺省额度未用');
+        assert.equal(revived.ctxAutoSummaryBlockedUntil, 0, '归档冷却重载后归零');
         const pending = JSON.parse(serializePendingQueue(session.pendingQueue));
         assert.equal(pending.length, 1);
         assert.equal(pending[0].content, '你好');
@@ -13414,6 +13410,75 @@ Object.assign(tests, {
         assert.equal(engine.repository.listUnits(bank).filter(u => u.consolidationState === 'pending').length, 0);
     },
 
+    /** P0-1：多个 cluster 合并为一次批量决策请求 */
+    async testV3BatchDecisionSingleCall(): Promise<void> {
+        let calls = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000,
+            observationDecisionBatch: async items => {
+                calls++;
+                return items.map((_, i) => ({ action: 'create', text: `批量观察 ${i + 1}` }) as any);
+            },
+        });
+        const bank = 'user_QQ:batch';
+        const tags = ['user:QQ:batch', 'vis:owner'];
+        for (const content of ['喜欢咖啡', '喜欢茶', '喜欢跑步']) {
+            await engine.retain(bank, { content, tags, entities: [content] });
+        }
+        const out = await engine.consolidate(bank, { maxFacts: 20 });
+        assert.equal(calls, 1, '3 个 cluster 应合并为 1 次批量请求');
+        assert.equal(out.created.length, 3, '批量中的每条 create 都应落库');
+        assert.equal(engine.repository.listUnits(bank).filter(u => u.consolidationState === 'pending').length, 0);
+    },
+
+    /** P0-1：批量调用抛分类错误时整批上抛，不得退化成逐条重发 */
+    async testV3BatchApiErrorNoPerItemFallback(): Promise<void> {
+        let single = 0;
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000,
+            observationDecision: async () => { single++; return { action: 'create', text: '单条' } as any; },
+            observationDecisionBatch: async () => {
+                throw ApiError.fromResponse(429, 'deepseek', '{"error":{"message":"Insufficient credits","type":"insufficient_quota"}}');
+            },
+        });
+        const bank = 'user_QQ:batch-error';
+        await engine.retain(bank, { content: '喜欢咖啡', tags: ['user:QQ:batch-error', 'vis:owner'] });
+        await assert.rejects(() => engine.consolidate(bank, { maxFacts: 20 }));
+        assert.equal(single, 0, '分类错误不得逐条重发（成本放大器）');
+        assert.equal(engine.repository.listUnits(bank).filter(u => u.consolidationState === 'pending').length, 1, '失败不标记巩固');
+    },
+
+    /** P1-1：混合取数 = 最老一半 + 重要度一半 */
+    async testV3ConsolidatePicksOldestAndImportant(): Promise<void> {
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000,
+            observationDecision: async () => ({ action: 'create', text: '观察' } as any),
+        });
+        const bank = 'user_QQ:pick';
+        const tags = ['user:QQ:pick', 'vis:owner'];
+        const ids: string[] = [];
+        for (let i = 0; i < 30; i++) {
+            const text = String.fromCharCode(0x4e00 + i * 137) + String.fromCharCode(0x4e00 + i * 31);
+            const r = await engine.retain(bank, {
+                content: text,
+                tags,
+                entities: [`e${i}`],
+                importance: i < 15 ? 0.1 : 0.9,
+            });
+            ids.push(r.unitIds[0]);
+        }
+        const out = await engine.consolidate(bank, { maxFacts: 20 });
+        assert.equal(out.created.length, 20, '单次只处理 20 条');
+        const done = new Set(engine.repository.listUnits(bank)
+            .filter(u => u.consolidationState === 'done')
+            .map(u => u.id));
+        for (let i = 0; i < 10; i++) assert.ok(done.has(ids[i]), `最老的 10 条应被处理（第 ${i} 条）`);
+        assert.equal(engine.repository.listUnits(bank).filter(u => u.consolidationState === 'pending').length, 10);
+    },
+
     async testV3MentalModelRefreshWatermark(): Promise<void> {
         let now = 1000;
         const engine = new MemoryEngine({
@@ -13550,6 +13615,31 @@ Object.assign(tests, {
         const jobs = MemoryScheduler.snapshot();
         assert.equal(jobs.some(j => j.source === 'manual'), false, '手动任务完成后移除');
         assert.equal(jobs.some(j => j.source === 'ai'), true, '自动任务仍等待 AI');
+        resetMemorySchedulerForTest();
+    },
+
+    async testV3FatalAuxPausesScheduler(): Promise<void> {
+        resetAuxBreaker();
+        const engine = new MemoryEngine({
+            storage: new InMemoryMemoryStorage(),
+            now: () => 1000,
+            observationDecision: async () => {
+                throw ApiError.fromResponse(402, 'deepseek', '{"error":{"message":"Insufficient Balance","type":"insufficient_quota"}}');
+            },
+        });
+        setMemoryEngineFactory(() => engine);
+        const bank = 'user_QQ:fatal';
+        await engine.retain(bank, { content: '喜欢咖啡', tags: ['user:QQ:fatal', 'vis:owner'] });
+        resetMemorySchedulerForTest();
+        MemoryScheduler.init();
+        MemoryScheduler.enqueueForTest({ kind: 'consolidate', bankId: bank, source: 'manual', priority: 0, payload: {} });
+        const now = Math.floor(Date.now() / 1000);
+        await MemoryScheduler.tick(now);
+        assert.ok(MemoryScheduler.status().pausedUntil > now, 'fatal aux 错误应立即熔断');
+        const job = MemoryScheduler.snapshot().find(j => j.bankId === bank);
+        assert.ok(job, 'fatal 时 job 应保留在队列');
+        assert.equal(job!.attempts, 0, 'fatal 不累加 attempts');
+        resetAuxBreaker();
         resetMemorySchedulerForTest();
     },
 

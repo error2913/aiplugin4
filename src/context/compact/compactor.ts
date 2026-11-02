@@ -52,9 +52,40 @@ export interface CompactOptions {
  */
 export interface CompactDeps {
     summarize: (text: string) => Promise<string | null | undefined> | string | null | undefined;
+    /**
+     * 合并模式（P0-4）：一次调用同时产出滚动摘要与本段 facts。
+     * 返回 null 视为失败（不推进、不提交）。
+     */
+    summarizeAndExtract?: (input: { previousSummary: string; segmentText: string }) =>
+        Promise<{ summary: string; facts: unknown[] } | null>;
+    /** 归档段 facts 写库（由 service.compact 在摘要提交后调用；失败时草稿保留待重放） */
+    applyFacts?: (facts: unknown[], info: ArchiveFactsInfo) => Promise<void>;
+    /** 两阶段草稿：崩溃/失败后重放同一 payload（不重调 LLM） */
+    loadArchiveDraft?: () => ArchiveDraft | null;
+    saveArchiveDraft?: (draft: ArchiveDraft) => void;
+    clearArchiveDraft?: () => void;
     estimateEventTokens: (event: ConversationEvent) => number;
     now?: () => number;
     newRecordId?: (info: { epoch: number; fromSeq: number; toSeq: number; at: number }) => string;
+}
+
+export interface ArchiveFactsInfo {
+    epoch: number;
+    fromSeq: number;
+    toSeq: number;
+}
+
+/** 归档段的两阶段草稿（持久化在 session_runtime 的 storage key 里） */
+export interface ArchiveDraft {
+    info: ArchiveFactsInfo;
+    summaryText: string;
+    recordId: string;
+    at: number;
+    fromAt?: number;
+    toAt?: number;
+    unsummarizedTokens: number;
+    facts: unknown[];
+    applied: boolean;
 }
 
 export type CompactSkipReason =
@@ -98,6 +129,8 @@ export interface CompactResult {
     truncated: boolean;
     /** reason='summary-error' 时的错误信息 */
     error?: string;
+    /** 合并模式下本段抽出的事实（未合并模式为空数组）；由 service 层负责写库/草稿 */
+    facts?: unknown[];
 }
 
 function finiteInt(value: unknown, fallback: number): number {
@@ -305,16 +338,37 @@ export async function compactOnce(
     }
 
     let summarized: string | null | undefined;
-    try {
-        summarized = await deps.summarize(summarizeInput);
-    } catch (error) {
-        return {
-            ...base(),
-            reason: 'summary-error',
-            batch,
-            inputChars: summarizeInput.length,
-            error: error instanceof Error ? error.message : String(error),
-        };
+    let facts: unknown[] = [];
+    if (deps.summarizeAndExtract) {
+        // 合并模式：摘要与 facts 同一请求。解析失败/空摘要 → 不推进（用户已确认不做后备）
+        try {
+            const out = await deps.summarizeAndExtract({ previousSummary: previousText, segmentText });
+            if (!out) {
+                return { ...base(), reason: 'summary-error', batch, inputChars: summarizeInput.length, error: 'combined-unavailable' };
+            }
+            summarized = out.summary;
+            facts = Array.isArray(out.facts) ? out.facts : [];
+        } catch (error) {
+            return {
+                ...base(),
+                reason: 'summary-error',
+                batch,
+                inputChars: summarizeInput.length,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    } else {
+        try {
+            summarized = await deps.summarize(summarizeInput);
+        } catch (error) {
+            return {
+                ...base(),
+                reason: 'summary-error',
+                batch,
+                inputChars: summarizeInput.length,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
     }
     const trimmed = typeof summarized === 'string' ? summarized.trim() : '';
     if (trimmed === '') {
@@ -340,6 +394,7 @@ export async function compactOnce(
         batch,
         inputChars: summarizeInput.length,
         truncated: limited.truncated,
+        facts,
     };
 }
 

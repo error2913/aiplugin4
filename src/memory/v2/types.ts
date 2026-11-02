@@ -222,6 +222,10 @@ export interface RetainInput {
     supersedes?: string;
     /** private 语义映射到 owner 可见性 */
     visibility?: 'public' | 'private' | 'origin' | 'owner';
+    /** 事件类事实不参与观察巩固（P1-2，开关默认关）：创建即 done */
+    skipConsolidation?: boolean;
+    /** 延迟落盘：批量写入时由调用方统一 save（P2-1） */
+    deferSave?: boolean;
 }
 
 export interface RetainResult {
@@ -317,11 +321,21 @@ export interface MemoryStatus {
 
 export type Reranker = (query: string, candidates: MemoryUnit[]) => Promise<string[]>;
 export type ObservationSynthesizer = (quotes: string[]) => Promise<string>;
-export type ObservationDecisionMaker = (input: {
+export type ObservationDecisionMaker = (input: ObservationDecisionInput) => Promise<ObservationDecision>;
+
+export interface ObservationDecisionInput {
     evidence: string[];
     existing: Observation[];
     tags: string[];
-}) => Promise<ObservationDecision>;
+}
+
+/**
+ * 批量决策（P0-1）：一次请求判定多个 cluster。
+ * 返回数组与入参一一对应；无法决策的条目返回 null（调用方按单条/本地 create 补）。
+ */
+export type ObservationDecisionBatchMaker = (
+    items: ObservationDecisionInput[],
+) => Promise<Array<ObservationDecision | null>>;
 
 export interface ReflectSynthesizerContext {
     mentalModels: MentalModel[];

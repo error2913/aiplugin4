@@ -1,8 +1,8 @@
 // .ai memo：个人/群聊/本体记忆、观察、心智模型管理。
-import { resetContextBridgeCursor } from "../../agent/context_bridge";
 import { MemoryScheduler } from "../../agent/memory_scheduler";
 import Config from "../../config/config";
 import { PRIVILEGE_LEVEL_MAP } from "../../config/static_config";
+import { clearArchiveDraftForSession } from "../../context/compact/session_runtime";
 import { MemoryManager } from "../../memory/manager";
 import { bumpMemoryRevision, bumpSummaryRevision } from "../../memory/revision";
 import { MemoryService } from "../../memory/service";
@@ -122,7 +122,7 @@ export function registerCmdMemory(): void {
                     `观察 ${status.observations} 条（过期 ${status.expiredObservations}）`,
                     `心智模型 ${status.mentalModels} 条（pending ${status.pendingMentalModels} / failed ${status.failedMentalModels}）`,
                     `巩固积压：${status.backlog}（pending ${status.pendingFacts} 条）`,
-                    `后台队列 ${sched.jobs}，本小时 LLM ${sched.hourlyCalls}${sched.pausedUntil > Date.now() / 1000 ? '（熔断中）' : ''}`,
+                    `后台队列 ${sched.jobs}${sched.pausedUntil > Date.now() / 1000 ? '（熔断中）' : ''}`,
                     `MM 自动刷新：${(Config.memory as any).MM_REFRESH_AFTER_CONSOLIDATION ? '开' : '关'}；模型：${models.slice(0, 5).map(m => `${m.sourceQuery.slice(0, 12)}${m.status === 'ready' ? '' : `(${m.status})`}`).join('；') || '（空）'}`,
                 ].join('\n'));
                 return ret;
@@ -192,7 +192,7 @@ export function registerCmdMemory(): void {
                 MemoryScheduler.dropBank(target.bankId);
                 if (target.kind !== 'global') {
                     const sid = target.session?.sessionId || target.bankId.replace(/^(user|group)_/, '');
-                    try { resetContextBridgeCursor(getSession(sid)); } catch { /* ignore */ }
+                    try { clearArchiveDraftForSession(sid); } catch { /* ignore */ }
                 }
                 rev();
                 reply(`已清除 ${n} 条事实/观察/模型`);

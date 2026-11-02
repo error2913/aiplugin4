@@ -337,3 +337,31 @@ export function resolveEffectiveMaxTokens(
     }
     return { tokens: DEFAULT_MAX_CONTEXT_TOKENS, source: 'default' };
 }
+
+// ===== 辅助 LLM（记忆/归档/摘要）错误处理分档 =====
+
+/** aux 调用的错误处理档位：fatal=熔断+切模型；retry=退避重试；degrade=原降级逻辑 */
+export type AuxErrorClass = 'fatal' | 'retry' | 'degrade';
+
+/**
+ * fatal 类：继续重试只会继续烧钱/继续失败，必须熔断。
+ * retry 类：requestModel 内部已按 Retry-After 重试过，仍失败则让 job 退避。
+ * 其余（内容安全/参数/图片等）：保持原有降级语义。
+ */
+export function classifyAuxError(kind: ApiErrorKind): AuxErrorClass {
+    if (kind === 'balance' || kind === 'auth' || kind === 'permission' || kind === 'model_not_found') {
+        return 'fatal';
+    }
+    if (kind === 'rate_limit' || kind === 'overloaded' || kind === 'server' || kind === 'context_too_long') {
+        return 'retry';
+    }
+    return 'degrade';
+}
+
+/** 结构判断：跨模块打包/测试桩下 `instanceof` 不可靠，按 kind+status 识别 ApiError */
+export function isClassifiedApiError(e: unknown): e is ApiError {
+    if (!e || typeof e !== 'object') return false;
+    const kind = (e as { kind?: unknown }).kind;
+    const status = (e as { status?: unknown }).status;
+    return typeof kind === 'string' && typeof status === 'number';
+}

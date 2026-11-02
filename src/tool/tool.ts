@@ -15,6 +15,9 @@ export { toolMap };
 
 const log = Logger.withTag('tool');
 
+/** 确定性失败码：同一条错误重试不会变好，连续 2 次后短路（P2-2） */
+const DETERMINISTIC_FAILURE_CODES = new Set(['not_found', 'not_enabled', 'session_type', 'missing_required', 'invalid_arg', 'bad_args']);
+
 /** function calling 路径的错误文案（模型可见，英文） */
 function functionCallErrorText(name: string, rawArgs: string, failure?: ToolFailure): string {
     switch (failure?.code) {
@@ -157,10 +160,25 @@ export default class Tool {
     static async handleToolCall(ctx: seal.MsgContext, msg: seal.Message, session: Session, tool_call: ToolCall): Promise<{ result: ToolCallResult, callBack: boolean }> {
         const name = tool_call.function.name;
         const rawArgs = tool_call.function.arguments;
+        if (!session.tool.failStreak) session.tool.failStreak = {};
+        const streak = session.tool.failStreak[name] ?? 0;
+        if (streak >= 2) {
+            return {
+                result: {
+                    tool_call_id: tool_call.id,
+                    content: `Function call failed: "${name}" already failed ${streak} times in this turn. Do not retry it; answer with what you have.`,
+                },
+                callBack: true,
+            };
+        }
         const execution = await executeTool(name, ctx, msg, session, { source: 'function', args: rawArgs, repairJson: true });
         if (!execution.ok) {
+            const code = execution.failure?.code;
+            if (code && DETERMINISTIC_FAILURE_CODES.has(code)) session.tool.failStreak[name] = streak + 1;
+            else delete session.tool.failStreak[name];
             return { result: { tool_call_id: tool_call.id, content: functionCallErrorText(name, rawArgs, execution.failure) }, callBack: true };
         }
+        delete session.tool.failStreak[name];
         const result: ToolCallResult = { tool_call_id: tool_call.id, content: execution.content ?? '' };
         if (execution.contentParts && execution.contentParts.length > 0) result.contentParts = execution.contentParts;
         return { result, callBack: execution.callBack ?? true };

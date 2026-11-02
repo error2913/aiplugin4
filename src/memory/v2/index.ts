@@ -4,7 +4,7 @@ import Model from "../../model/model";
 import { getMemoryEngineInstance, setMemoryEngineFactory } from "../service";
 
 import { MemoryEngine } from "./engine";
-import { defaultDeltaOperator, defaultObservationDecisionMaker, defaultObservationSynthesizer, defaultReflectSynthesizer, defaultReranker } from "./llm";
+import { defaultDeltaOperator, defaultObservationBatchDecisionMaker, defaultObservationDecisionMaker, defaultObservationSynthesizer, defaultReflectSynthesizer, defaultReranker } from "./llm";
 import { setObservationStaleDays } from "./prompt";
 import { getDefaultMemoryStorage, InMemoryMemoryStorage } from "./storage";
 import type { MemoryStorage } from "./storage";
@@ -39,6 +39,7 @@ export function createMemoryEngine(): MemoryEngine {
     if (flag('OBSERVATION_ENABLED', true)) {
         engine.setObservationSynthesizer(defaultObservationSynthesizer);
         engine.setObservationDecision(defaultObservationDecisionMaker);
+        engine.setObservationDecisionBatch(defaultObservationBatchDecisionMaker);
     }
     if (flag('LLM_REFLECT_SYNTH', true)) engine.setReflectSynthesizer(defaultReflectSynthesizer);
     engine.setDeltaOps(defaultDeltaOperator);

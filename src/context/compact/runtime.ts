@@ -9,10 +9,9 @@
 //
 // 约束：本文件不读 Config/seal；summarizer/estimator/时钟/记录 id 全部注入。
 import { COMPACT_ARCHIVE_MAX_BATCHES, COMPACT_BATCH_TOKENS, COMPACT_MAX_BATCHES_PER_RUN } from "../../utils/context_limits";
-import type { ConversationEvent } from "../events";
 
 import { Backoff } from "./compactor";
-import type { CompactResult } from "./compactor";
+import type { CompactDeps, CompactResult } from "./compactor";
 
 export interface CompactionRuntimeOptions {
     /** 单批送入摘要器的 token 上限 */
@@ -31,12 +30,7 @@ export interface CompactionRuntimeService {
     flush(): Promise<{ ok: boolean; error?: string }>;
 }
 
-export interface CompactionDeps {
-    summarize: (text: string) => Promise<string | null | undefined> | string | null | undefined;
-    estimateEventTokens: (event: ConversationEvent) => number;
-    now?: () => number;
-    newRecordId?: (info: { epoch: number; fromSeq: number; toSeq: number; at: number }) => string;
-}
+export type CompactionDeps = CompactDeps;
 
 export interface CompactionRuntimeDeps extends CompactionDeps {
     service: CompactionRuntimeService;
@@ -123,6 +117,11 @@ export class CompactionRuntime {
                     { batchTokens, summaryMaxChars: this.summaryMaxChars },
                     {
                         summarize: this.deps.summarize,
+                        summarizeAndExtract: this.deps.summarizeAndExtract,
+                        applyFacts: this.deps.applyFacts,
+                        loadArchiveDraft: this.deps.loadArchiveDraft,
+                        saveArchiveDraft: this.deps.saveArchiveDraft,
+                        clearArchiveDraft: this.deps.clearArchiveDraft,
                         estimateEventTokens: this.deps.estimateEventTokens,
                         now: () => this.now(),
                         newRecordId: this.deps.newRecordId,
@@ -144,7 +143,7 @@ export class CompactionRuntime {
                 } else {
                     this.backoff.reset();
                 }
-            } else if (result.reason === 'summary-error' || result.reason === 'missing-history') {
+            } else if (result.reason === 'summary-error' || result.reason === 'missing-history' || result.reason === 'empty-summary') {
                 this.backoff.fail(this.now());
             } else if (result.batches > 0 && result.reason === 'flush-failed') {
                 this.backoff.fail(this.now());

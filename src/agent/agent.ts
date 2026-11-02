@@ -6,6 +6,8 @@ import { setAgentResolver } from "../core/ports/agent_registry";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
 import { ApiError, computeArchiveTarget, isImageDownloadFailure, isImageRejectedFailure, KIND_LABEL, parseImageErrorPosition, parseMaxContextTokens, resolveEffectiveMaxTokens } from "../model/api_error";
+import { isAuxPaused } from "../model/aux_breaker";
+import { pickNextModel } from "../model/fallback";
 import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
 import { getProbedContextWindow, rememberProbedContextWindow } from "../model/window_cache";
@@ -29,7 +31,7 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { collectContextBacklog, compactContextV2 } from "./context_bridge";
+import { compactContextV2 } from "./context_bridge";
 import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -52,37 +54,10 @@ function newModelErrorHandled(): ModelErrorHandled {
 }
 
 /**
- * 从**有序**候选列表里选下一个备用模型。
- *
- * **只往后走，不回头**：从当前模型在列表里的位置往下一个一个取。
- * 候选列表已按用户的 purposes 顺序排（见 `Model.listModelsForUse`），
- * 所以多级回退严格按用户排的顺序推进。
- *
- * 为什么不是"取第一个不等于当前的"（原实现）：当前模型若不是列表首位，
- * 那个写法会**绕回开头** —— A→B 之后 B 失败又切回 A，在两个模型间来回跳。
- * 走到末尾就没有下一个了（返回 null），而不是重试已经失败过的。
- *
- * 导出为纯函数是为了**单测能跑真代码**：复刻一份逻辑的测试证明不了实现对
- * （本轮踩过：测试里复刻了旧写法，于是实现改对了测试仍然失败）。
- *
- * @param strategy 'cross' 时优先挑不同 provider 的（避开整家厂商故障）
+ * 备用模型选择已迁到 `model/fallback.ts`（memory scheduler / aux breaker 共用，
+ * 避免 agent ↔ memory_scheduler 运行时环）。这里 re-export 兼容既有 import。
  */
-export function pickNextModel(
-    pool: ModelEntry[],
-    current: ModelEntry | null,
-    strategy: 'cross' | 'order',
-): ModelEntry | null {
-    if (pool.length === 0) return null;
-    const idx = current ? pool.findIndex(c => c.ref === current.ref) : -1;
-    // current 不在候选里（已退役/改名/类型变了）→ 从列表头开始找
-    const forward = idx >= 0 ? pool.slice(idx + 1) : pool;
-    if (forward.length === 0) return null;
-    if (strategy === 'cross' && current) {
-        const cross = forward.find(c => c.provider !== current.provider);
-        if (cross) return cross;
-    }
-    return forward[0];
-}
+export { pickNextModel };
 
 const log = Logger.withTag('agent');
 
@@ -142,9 +117,8 @@ export default class Agent {
     private async settleBacklog(session: Session): Promise<void> {
         try {
             if (session.contextV2) {
-                // 上下文压缩改为「预算到顶后由 run 结束钩子触发」（见 scheduleContextCompaction）；
-                // 这里只收集记忆桥待抽取原文（纯代码、零 LLM）。
-                collectContextBacklog(session);
+                // contextV2：记忆抽取已并入「归档」（见 scheduleContextCompaction → compactContextV2）；
+                // 这里不再收集/抽取原文，零 LLM。
                 return;
             }
             await session.context.settleWindowIfNeeded();
@@ -154,17 +128,19 @@ export default class Agent {
     }
 
     /**
-     * 预算到顶后的自动摘要：**本会话（epoch）最多 1 次**，成功才消耗额度。
+     * 预算到顶后的自动归档（滚动摘要 + 记忆 facts 同一请求）。
      * 触发条件（全部满足）：
-     * - 额度未用且没有在飞（`ctxAutoSummaryUsed` / `ctxAutoSummaryInFlight`）；
+     * - 没有在飞（`ctxAutoSummaryInFlight`）；
      * - 本轮编译确实发生了预算裁剪（`lastCompile()` 非空且 `omittedFromSeq !== null`）；
      * - 仍有未摘要原文超过保留目标（`unsummarizedTokens > targetTokens`，避免空跑）。
-     * 不阻塞回复；失败/未推进不消耗额度；额度用尽后只归档（编译期省略，零 LLM）。
+     * 同一 epoch 可反复归档（不再有「每会话一次」额度）；失败由 runtime 退避。
      */
     private scheduleContextCompaction(session: Session): void {
         const service = session.contextV2;
         if (!service) return;
-        if (session.ctxAutoSummaryUsed || session.ctxAutoSummaryInFlight) return;
+        if (session.ctxAutoSummaryInFlight) return;
+        if (isAuxPaused()) return;
+        if (session.ctxAutoSummaryBlockedUntil > Date.now()) return;
 
         const stats = service.lastCompile();
         if (!stats || stats.omittedFromSeq === null) return;
@@ -178,27 +154,35 @@ export default class Agent {
             .then(result => {
                 session.ctxAutoSummaryInFlight = false;
                 if (result?.advanced) {
-                    session.ctxAutoSummaryUsed = 1;
                     session.save();
-                    log.info(`[ctx-compact] 本会话唯一一次自动摘要：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                    log.info(`[ctx-compact] 自动归档：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
+                } else if (result?.reason === 'missing-history') {
+                    // 事件页只加载了最近窗口：结构性失败，不自愈。冷却 30 分钟，避免每轮重试/告警
+                    session.ctxAutoSummaryBlockedUntil = Date.now() + 30 * 60 * 1000;
+                    session.save();
+                    log.warning('[ctx-compact] 历史窗口不足，自动归档冷却 30 分钟（可用 .ai ctx archive 手动重试）');
                 } else {
-                    log.warning(`[ctx-compact] 自动摘要未推进（${result?.reason ?? 'unknown'}），额度保留`);
+                    log.warning(`[ctx-compact] 自动归档未推进（${result?.reason ?? 'unknown'}），保留重试`);
                 }
             })
             .catch(e => {
                 session.ctxAutoSummaryInFlight = false;
-                log.warning('[ctx-compact] 自动摘要异常（额度保留）: ' + (e instanceof Error ? e.message : String(e)));
+                log.warning('[ctx-compact] 自动归档异常（保留重试）: ' + (e instanceof Error ? e.message : String(e)));
             });
     }
     /**
      * 单轮对话（aux LLM / 外部插件）：
      * **默认不解析图片**（D3）——prompt 里的 [img:ID] 只作为文本保留；
      * 需要模型看图的调用方显式传 `{ allowImages: true }`。
+     * `throwClassified: true` 时把模型分类错误上抛（供记忆/归档熔断）；缺省维持吞错。
      */
-    async chat(prompt: string, opts?: { allowImages?: boolean }): Promise<string> {
+    async chat(prompt: string, opts?: { allowImages?: boolean; throwClassified?: boolean }): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
-        if (!model) return '';
+        if (!model) {
+            if (opts?.throwClassified) throw new Error('aux_llm_unavailable');
+            return '';
+        }
         const messages: RequestMessage[] = [];
         if (this.instruction) {
             messages.push({
@@ -208,7 +192,10 @@ export default class Agent {
         }
         const allowImages = opts?.allowImages === true;
         messages.push({ role: 'user', content: model.isMultimodal && allowImages ? await textToMultimodalContent(prompt, { model, allowImages: true }) : prompt });
-        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model, undefined, { use: this.use });
+        const { content } = await streamService.sendChatRequest(messages, [], 'none', '', model, undefined, {
+            use: this.use,
+            throwClassified: opts?.throwClassified === true,
+        });
         return content;
     }
 
@@ -223,10 +210,13 @@ export default class Agent {
         return !!Model.getChatModel(this.use);
     }
 
-    async chatMessages(messages: { role: string, content: string }[], opts?: { allowImages?: boolean }): Promise<string> {
+    async chatMessages(messages: { role: string, content: string }[], opts?: { allowImages?: boolean; throwClassified?: boolean }): Promise<string> {
         await Model.ensureLoaded();
         const model = Model.getChatModel(this.use);
-        if (!model) return '';
+        if (!model) {
+            if (opts?.throwClassified) throw new Error('aux_llm_unavailable');
+            return '';
+        }
         const safeMessages = sanitizeChatMessages(messages as Array<{ role: string; content: unknown }>);
         const allowImages = opts?.allowImages === true;
         const requestMessages: RequestMessage[] = model.isMultimodal && allowImages
@@ -235,7 +225,10 @@ export default class Agent {
                 content: m.role === 'user' ? await textToMultimodalContent(m.content, { model, allowImages: true }) : m.content
             })))
             : safeMessages.map(m => ({ role: m.role, content: m.content }));
-        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model, undefined, { use: this.use });
+        const { content } = await streamService.sendChatRequest(requestMessages, [], 'none', '', model, undefined, {
+            use: this.use,
+            throwClassified: opts?.throwClassified === true,
+        });
         return content;
     }
 

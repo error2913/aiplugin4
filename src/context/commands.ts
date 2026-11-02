@@ -25,8 +25,6 @@ export interface ParsedCtxCommand {
 export interface CtxSessionLike {
     setting?: { overrides?: Record<string, unknown> };
     save?(): void;
-    /** 本会话自动摘要额度：0/缺省=未使用，1=已使用（每会话最多 1 次，成功才消耗） */
-    ctxAutoSummaryUsed?: number;
     /** 运行时统计（judge=评分触发次数；旧会话/游离会话可能缺省） */
     ctxStats?: { judge?: number };
     context: {
@@ -60,7 +58,7 @@ export function ctxHelpText(): string {
 
 const TOPIC_HELP: Record<string, string> = {
     status: '【.ai ctx status】查看当前上下文消息数、预算/保留强度、整理进度与最近一次整理结果。',
-    archive: '【.ai ctx archive】手动整理更早内容为滚动摘要（会花 LLM）：压缩到保留强度目标（保留最新原文），只生成摘要，不删除原文，不写长期记忆。自动摘要每会话最多 1 次。',
+    archive: '【.ai ctx archive】手动归档更早内容（会花 LLM）：压缩到保留强度目标（保留最新原文），同时抽取长期记忆；只生成摘要、不删除原文。自动归档在上下文溢出时触发，可反复。',
     hide: '【.ai ctx hide [user|assistant|all]】隐藏消息：模型与检索不可见，原文保留供审计。',
     purge: '【.ai ctx purge --yes】物理清除本会话上下文，不可恢复；需要骰主并显式加 --yes。默认不影响长期记忆。',
     set: '【.ai ctx set [budget=<tokens>] [retain=<1-100>]|clr】本会话覆盖上下文预算与保留强度；budget=0 表示跟随模型窗口，clr 恢复默认。',
@@ -144,9 +142,6 @@ export function formatCtxStatus(input: CtxCommandInput): string {
     lines.push(`保留强度：${budgets.retainPercent}%（压缩后保留约 ${budgets.targetTokens} token 最新原文）`);
     lines.push(`原文窗口：约 ${Math.max(0, stats.unsummarizedTokens)} token（未摘要）`);
     lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
-    lines.push(input.session?.ctxAutoSummaryUsed
-        ? '自动摘要：已使用（本会话上限 1 次）'
-        : '自动摘要：本会话未使用（上限 1 次，成功才消耗）');
     lines.push(`超预算内容：不注入请求，原文永久保留；可用 read_raw/grep_raw 回查（展示上限约 ${budgets.retainPercent + 100}% 预算）`);
     const judgeCount = input.session?.ctxStats?.judge;
     if (typeof judgeCount === 'number' && judgeCount > 0) lines.push(`自动评分：本会话已触发 ${judgeCount} 次`);
@@ -235,7 +230,7 @@ export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandR
             const budgets = resolveContextBudgets(input.session, '');
             const result = await input.runtime.archiveNow(budgets.targetTokens);
             return result.advanced
-                ? { text: `已整理 ${result.batches} 批：保留约 ${budgets.targetTokens} token 最新原文，其余压成摘要；原文仍可回查`, changed: true }
+                ? { text: `已归档 ${result.batches} 批：保留约 ${budgets.targetTokens} token 最新原文，其余压成摘要并抽取长期记忆；原文仍可回查`, changed: true }
                 : { text: `本次没有需要整理的内容${result.reason ? `（${result.reason}）` : ''}` };
         }
         case 'hide': {

@@ -38,6 +38,7 @@ import type {
     MentalModelTemplateId,
     MentalModelTrigger,
     Observation,
+    ObservationDecisionBatchMaker,
     ObservationDecisionMaker,
     RecallHit,
     RecallOptions,
@@ -53,6 +54,7 @@ export interface MemoryEngineOptions {
     embedding?: (text: string) => Promise<number[]>;
     rerank?: Reranker;
     observationDecision?: ObservationDecisionMaker;
+    observationDecisionBatch?: ObservationDecisionBatchMaker;
     observationSynthesizer?: (quotes: string[]) => Promise<string>;
     reflectSynthesizer?: ReflectSynthesizer;
     deltaOps?: DeltaOperator;
@@ -69,6 +71,7 @@ export class MemoryEngine {
     private embedding?: (text: string) => Promise<number[]>;
     private rerank?: Reranker;
     private observationDecision?: ObservationDecisionMaker;
+    private observationDecisionBatch?: ObservationDecisionBatchMaker;
     private observationSynthesizer?: (quotes: string[]) => Promise<string>;
     private reflectSynthesizer?: ReflectSynthesizer;
     private deltaOps?: DeltaOperator;
@@ -85,6 +88,7 @@ export class MemoryEngine {
         this.embedding = options.embedding;
         this.rerank = options.rerank;
         this.observationDecision = options.observationDecision;
+        this.observationDecisionBatch = options.observationDecisionBatch;
         this.observationSynthesizer = options.observationSynthesizer;
         this.reflectSynthesizer = options.reflectSynthesizer;
         this.deltaOps = options.deltaOps;
@@ -105,6 +109,7 @@ export class MemoryEngine {
 
     setReranker(rerank?: Reranker): void { this.rerank = rerank; }
     setObservationDecision(decider?: ObservationDecisionMaker): void { this.observationDecision = decider; }
+    setObservationDecisionBatch(decider?: ObservationDecisionBatchMaker): void { this.observationDecisionBatch = decider; }
     setObservationSynthesizer(synth?: (quotes: string[]) => Promise<string>): void { this.observationSynthesizer = synth; }
     setReflectSynthesizer(synth?: ReflectSynthesizer): void { this.reflectSynthesizer = synth; }
     setDeltaOps(ops?: DeltaOperator): void { this.deltaOps = ops; }
@@ -175,13 +180,13 @@ export class MemoryEngine {
             embedding: await this.embedText(content),
             entityIds,
             tags: Array.from(new Set(input.tags || [])),
-            metadata: { ...(input.metadata || {}), contentHash: hash },
+            metadata: { ...(input.metadata || {}), contentHash: hash, ...(input.skipConsolidation ? { skipConsolidation: '1' } : {}) },
             supersedes: input.supersedes,
             importance: typeof input.importance === 'number' ? Math.max(0, Math.min(1, input.importance)) : 0.5,
             accessCount: 0,
             lastAccessedAt: 0,
             state: 'valid',
-            consolidationState: 'pending',
+            consolidationState: input.skipConsolidation ? 'done' : 'pending',
         };
         this.repository.addUnit(bankId, unit, false);
 
@@ -200,7 +205,7 @@ export class MemoryEngine {
                 } catch { /* ignore */ }
             }
         }
-        this.repository.save(bankId, ['units', 'links', 'obs', 'meta'] as BankPart[]);
+        if (!input.deferSave) this.repository.save(bankId, ['units', 'links', 'obs', 'meta'] as BankPart[]);
         if (this.memoryCap > 0) this.prune(bankId);
         return { unitIds: [id], action: 'added' };
     }
@@ -386,6 +391,7 @@ export class MemoryEngine {
             return await doConsolidate({
                 repository: this.repository,
                 decideObservation: this.observationDecision,
+                decideObservationBatch: this.observationDecisionBatch,
                 synthesizeObservation: this.observationSynthesizer,
             }, bankId, opts);
         } finally {
