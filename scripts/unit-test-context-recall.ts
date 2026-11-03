@@ -349,4 +349,25 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.deepEqual(hitSeqs(empty), []);
         assert.equal(empty.exhausted, true);
     },
+
+    async testContextRecallArchivedStillSearchable() {
+        // 归档只影响"模型可见性"，不影响检索（默认「归档保留原文=开」）
+        const { store } = await seedStore(4, i => `消息${i}`);
+        assert.equal(store.commitArchive(2), 2);
+        assert.equal(store.getHead().archivedThrough, 2);
+
+        const result = grepRaw(store, snapshotOf(store), '消息2', { maxHits: 10 });
+        assert.deepEqual(hitSeqs(result), [2], '归档块仍可 grep_raw 命中');
+
+        const raw = readRaw(store, snapshotOf(store), 'e:2');
+        assert.equal(raw.items.length, 1);
+        assert.ok(raw.items[0].text.includes('消息2'));
+
+        // 落盘后重开：归档水位持久化，原文仍可检索
+        assert.equal((await store.flush()).ok, true);
+        const reopened = await ContextStore.open(SID);
+        assert.equal(reopened.getHead().archivedThrough, 2);
+        const after = grepRaw(reopened, snapshotOf(reopened), '消息3', { maxHits: 10 });
+        assert.deepEqual(hitSeqs(after), [3]);
+    },
 };

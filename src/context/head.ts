@@ -35,6 +35,12 @@ export interface ContextHead {
     summarizedThrough: number;
     /** 未摘要 token 估算（用于触发阈值；允许近似） */
     unsummarizedTokens: number;
+    /** 当前 epoch 已归档到的 seq（含）：原文对模型不可见（硬切/待机/总结完成都会推进） */
+    archivedThrough: number;
+    /** 未归档 token 估算（seq > archivedThrough；T 的原文部分；允许近似） */
+    unarchivedTokens: number;
+    /** 已物理清除原文的 seq 水位（含）：「归档保留原文=关」时归档页被清，检索不可达 */
+    deletedThrough: number;
     /** 事件 + 记录的近似总字节数（.ai ctx 展示用） */
     bytesTotal: number;
     /** 旧版兼容索引；无旧数据时缺省 */
@@ -54,6 +60,9 @@ export function createEmptyHead(): ContextHead {
         recFloor: 1,
         summarizedThrough: 0,
         unsummarizedTokens: 0,
+        archivedThrough: 0,
+        unarchivedTokens: 0,
+        deletedThrough: 0,
         bytesTotal: 0,
     };
 }
@@ -84,6 +93,16 @@ export function normalizeHead(raw: unknown): ContextHead | null {
     head.recFloor = Math.min(head.nextRecPageNo, asFiniteInt(r.recFloor, 1, 1));
     head.summarizedThrough = Math.max(head.epochStartSeq - 1, Math.min(head.nextSeq - 1, asFiniteInt(r.summarizedThrough, 0)));
     head.unsummarizedTokens = asFiniteInt(r.unsummarizedTokens, 0);
+    // 旧档兼容：无 archivedThrough 时按 summarizedThrough 初始化（历史上摘要边界即隐藏边界，行为不变）；
+    // 不变式 archivedThrough >= summarizedThrough 在读取时强制成立，冲突以 archivedThrough 为可见性边界。
+    head.archivedThrough = Math.max(
+        head.summarizedThrough,
+        Math.min(head.nextSeq - 1, asFiniteInt(r.archivedThrough, head.summarizedThrough)),
+    );
+    // 旧档没有未归档计数：用未摘要计数近似（archived == summarized 时两者相等；宁可偏大，只会多切不会超发）。
+    head.unarchivedTokens = asFiniteInt(r.unarchivedTokens, head.unsummarizedTokens);
+    // 已物理清除水位不超过归档边界（清除发生在总结覆盖之后的归档页上）。
+    head.deletedThrough = Math.max(0, Math.min(head.archivedThrough, asFiniteInt(r.deletedThrough, 0)));
     head.bytesTotal = asFiniteInt(r.bytesTotal, 0);
     if (r.legacy && typeof r.legacy === 'object') {
         const l = r.legacy as Record<string, unknown>;

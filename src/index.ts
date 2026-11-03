@@ -14,6 +14,7 @@ import { registerConfigAppliers } from "./config/apply";
 import { ext } from "./config/config";
 import Config from "./config/config";
 import { STORAGE_VERSION } from "./config/static_config";
+import { ContextService } from "./context/service";
 import { getHost, setHost } from "./core/host";
 import { setArchiveFactsSink } from "./core/ports/archive_facts";
 import { createSealHost } from "./core/seal_host";
@@ -53,6 +54,8 @@ function main() {
   installAuxLlm();
   installPromptMemorySource();
   Config.registerConfig();
+  // 上下文「归档保留原文」开关：装配层注入（context 层不 import config，避免跨层依赖）
+  ContextService.configureArchivedRetention(() => Config.context.KEEP_ARCHIVED_RAW);
   initAgents();
   registerAgentApi();
   checkUpdate();

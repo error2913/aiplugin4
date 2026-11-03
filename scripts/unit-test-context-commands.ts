@@ -116,14 +116,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
     async testContextCommandsArchiveAndRepair() {
         const sid = 'QQ:cmd-archive';
         const service = await seed(sid);
-        const noRuntime = await runCtxCommand({ sessionId: sid, service, args: ['archive'] });
-        assert.ok(noRuntime.text.includes('暂时无法整理'));
+        const noArchive = await runCtxCommand({ sessionId: sid, service, args: ['archive'] });
+        assert.ok(noArchive.text.includes('暂时无法整理'));
 
-        const runtime = {
-            archiveNow: async () => ({ ran: true, advanced: true, batches: 2, through: 2 }),
-            getLastResult: () => null,
+        const controller = {
+            archiveNow: async () => ({ advanced: true, batches: 2 }),
+            status: () => ({ watermarks: null }),
         } as any;
-        const archived = await runCtxCommand({ sessionId: sid, service, args: ['archive'], runtime });
+        const archived = await runCtxCommand({ sessionId: sid, service, args: ['archive'], archiveController: controller });
         assert.equal(archived.changed, true);
         assert.ok(archived.text.includes('已归档'));
         assert.ok(archived.text.includes('长期记忆'));

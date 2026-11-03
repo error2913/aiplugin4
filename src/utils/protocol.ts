@@ -246,7 +246,7 @@ export const SUMMARY_TRUNCATE_MARK = '… (summary too long; truncated)';
 
 // ---------------- 上下文桥角色标签 ----------------
 
-/** 记忆桥 pending 文本的角色标签（`src/agent/context_bridge.ts`） */
+/** 记忆桥 pending 文本的角色标签（历史格式，归档控制器输出同形文本） */
 export const CONTEXT_BRIDGE_ROLE_LABEL: Readonly<Record<string, string>> = {
     user: '[user] ',
     assistant: '[AI] ',

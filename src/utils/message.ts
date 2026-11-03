@@ -78,6 +78,13 @@ export interface MultimodalBuildOptions {
     inlineBudget?: InlineImageBudget;
     /** 工具消息是否允许图片（false = 文本投影；缺省读配置） */
     toolImages?: boolean;
+    /**
+     * v7 归档钩子：v2 编译前回调（同步），传入 L（预算 − 除滑动窗口外的全部提示词）
+     * 与保留强度；用于请求前硬切，以及请求发出后的并发总结（由 agent 接线）。
+     */
+    archiveHooks?: {
+        beforeCompile?: (info: { L: number; retainPercent: number }) => void;
+    };
 }
 
 interface MessageItem {
@@ -563,7 +570,8 @@ function compileV2Request(
     multimodal: boolean,
     tools: unknown[] | undefined,
     modelName: string | undefined,
-    opts?: MultimodalBuildOptions,
+    opts: MultimodalBuildOptions | undefined,
+    runtimeTokens: number,
 ): CompiledMessage[] | null {
     if (!session.contextV2) return null;
     try {
@@ -579,6 +587,16 @@ function compileV2Request(
         const toolsReserveTokens = Array.isArray(tools) && tools.length > 0
             ? estimateTextTokens(JSON.stringify(tools))
             : 0;
+        // v7 归档：L = 预算 − 除滑动窗口外的全部提示词（system/samples + 工具 schema + runtime 段）。
+        // 用永久预算（不含 context_too_long 临时 cap），并按编译同一校准口径换算。
+        const permanentBudget = resolveCompileBudget(budgets.permanentBudget, modelName);
+        // 前缀 token 与编译同口径（把同一个 prefixTokens 传给 compile，保证 L 与编译可用预算一致）
+        const prefixTokens = prefix.reduce((n, m) => n + estimateTextTokens(
+            typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        ), 0);
+        const fixedPromptTokens = prefixTokens + toolsReserveTokens + Math.max(0, Math.floor(runtimeTokens));
+        const L = Math.max(1, permanentBudget - fixedPromptTokens);
+        opts?.archiveHooks?.beforeCompile?.({ L, retainPercent: budgets.retainPercent });
         // 本轮内联图片预算（同一次请求共享）：超出后只留文本标签（descriptors 会先渲染 [img:ID] 文本）
         const cfgLimit = Config.image.MAX_IMAGES_PER_REQUEST;
         const budgetRef = opts?.imageBudget ?? { left: cfgLimit > 0 ? cfgLimit : Number.POSITIVE_INFINITY };
@@ -590,6 +608,7 @@ function compileV2Request(
         const imageRefs = opts?.trace?.refs;
         const compiled = session.contextV2.compile({
             prefixMessages: prefix,
+            prefixTokens,
             budgetTokens: budget,
             toolsReserveTokens,
             mode: Config.tool.PROMPT_ENGINEERING ? 'prompt-engineering' : 'native',
@@ -722,7 +741,10 @@ export async function handleMessages(
     // 事件账本：请求完全由 compileRequest 决定，不再走下面的旧 messages 折叠/预算/配对路径。
     // 编译失败才回退旧路径（迁移失败/兼容场景），避免冷热折叠等旧逻辑在 v2 下继续执行。
     if (session.contextV2) {
-        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName, messageOpts());
+        const runtimeTokens = runtimeText
+            ? estimateTextTokens(`[system:runtime]\n${runtimeText}\n[/system]`)
+            : 0;
+        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName, messageOpts(), runtimeTokens);
         if (compiled) return withRuntimeContext(compiled as RequestMessage[], runtimeText);
     }
     const clonedContext = (session.context.messages as ContextMessage[]).map(cloneContextMessage);

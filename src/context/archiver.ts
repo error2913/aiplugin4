@@ -85,7 +85,7 @@ export async function settleWindowIfNeeded(host: ArchiveHost, now: number = Date
         const idleSec = s.lastRelevantAt > 0 ? Math.max(0, now - s.lastRelevantAt) / 1000 : Infinity;
         if (state !== 'COLD' && SETTLE_IDLE_SEC > 0 && idleSec < SETTLE_IDLE_SEC) return 0;
 
-        // legacy v1：不再写记忆（v3 记忆由 context_bridge + scheduler 负责）；仅推进结算水位
+        // legacy v1：不再写记忆（v3 记忆由归档控制器 + scheduler 负责）；仅推进结算水位
         let done = 0;
         for (const shard of pending) {
             if (shard.seq !== undefined) {

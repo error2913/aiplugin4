@@ -28,6 +28,12 @@ export interface ContextStats {
     lastSeq: number;
     summarizedThrough: number;
     unsummarizedTokens: number;
+    /** 原文对模型不可见的归档边界（seq，含） */
+    archivedThrough: number;
+    /** seq > archivedThrough 的原文 token 估算（T 的原文部分） */
+    unarchivedTokens: number;
+    /** 已物理清除原文的水位（seq，含）；「归档保留原文=关」时生效 */
+    deletedThrough: number;
     legacy: boolean;
 }
 
@@ -56,12 +62,16 @@ export function purgeSession(sessionId: string, head: ContextHead): PurgeResult 
         recFloor: head.nextRecPageNo,
         summarizedThrough: head.epochStartSeq - 1 + (head.nextSeq - head.epochStartSeq),
         unsummarizedTokens: 0,
+        unarchivedTokens: 0,
+        deletedThrough: 0,
         bytesTotal: 0,
         legacy: head.legacy
             ? { ...head.legacy, phase: 'flipped' }
             : undefined,
     };
     nextHead.summarizedThrough = nextHead.epochStartSeq - 1;
+    nextHead.archivedThrough = nextHead.summarizedThrough;
+    nextHead.deletedThrough = nextHead.summarizedThrough;
 
     let clearedEventPages = 0;
     for (let pageNo = head.pageFloor; pageNo < head.nextPageNo; pageNo++) {
@@ -127,6 +137,9 @@ export function contextStats(store: ContextStore): ContextStats {
         lastSeq: seqs.length > 0 ? Math.max(...seqs) : 0,
         summarizedThrough: head.summarizedThrough,
         unsummarizedTokens: head.unsummarizedTokens,
+        archivedThrough: head.archivedThrough,
+        unarchivedTokens: head.unarchivedTokens,
+        deletedThrough: head.deletedThrough,
         legacy: !!head.legacy,
     };
 }

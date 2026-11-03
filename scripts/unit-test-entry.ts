@@ -2841,8 +2841,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         session.sessionId = 'QQ:persist';
         session.setting.aiEnabled = true;
         session.running = true;
-        session.ctxAutoSummaryInFlight = true;
-        session.ctxAutoSummaryBlockedUntil = Date.now() + 1000;
         session.pendingQueue.push({ ctx: {} as any, msg: {} as any, content: '你好', userId: 'QQ:1', messageId: 'm1', kind: 'record', epId: 'ep1', isPrivate: false });
         const raw = serializeSession(session);
         const data = JSON.parse(raw);
@@ -2851,12 +2849,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
             assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
         }
-        // 归档在飞标记与 missing-history 冷却只在运行期（不持久化）
-        assert.ok(!('ctxAutoSummaryInFlight' in data), '在飞标记不应落盘');
-        assert.ok(!('ctxAutoSummaryBlockedUntil' in data), '归档冷却不应落盘');
         const revived = revive(Session, data) as Session;
-        assert.equal(revived.ctxAutoSummaryInFlight, false, '在飞标记重载后回 false');
-        assert.equal(revived.ctxAutoSummaryBlockedUntil, 0, '归档冷却重载后归零');
+        assert.equal(revived.running, false, '重载后 running 归零');
         const pending = JSON.parse(serializePendingQueue(session.pendingQueue));
         assert.equal(pending.length, 1);
         assert.equal(pending[0].content, '你好');

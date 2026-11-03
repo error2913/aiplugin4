@@ -3,7 +3,7 @@
 import { resolveContextBudgets } from "../utils/context_budget";
 
 import { contextStats, hideEvents, HideTarget, purgeSession, repairHead } from "./admin";
-import type { CompactionRuntime } from "./compact/runtime";
+import type { ArchiveController, ArchiveControllerStatus } from "./archive_controller";
 import type { ContextService } from "./service";
 import { applyVisibility, buildRecordIndex } from "./view/records";
 import { segmentUnits } from "./view/units";
@@ -58,7 +58,7 @@ export function ctxHelpText(): string {
 
 const TOPIC_HELP: Record<string, string> = {
     status: '【.ai ctx status】查看当前上下文消息数、预算/保留强度、整理进度与最近一次整理结果。',
-    archive: '【.ai ctx archive】手动归档更早内容（会花 LLM）：压缩到保留强度目标（保留最新原文），同时抽取长期记忆；只生成摘要、不删除原文。自动归档在上下文溢出时触发，可反复。',
+    archive: '【.ai ctx archive】手动归档更早内容（会花 LLM）：总结到未归档原文剩余 ≤ 保留目标（保留最新原文），同时抽取长期记忆；默认只生成摘要、不删除原文（「归档保留原文」关闭时清理已总结归档页）。自动归档按水位触发，可反复。',
     hide: '【.ai ctx hide [user|assistant|all]】隐藏消息：模型与检索不可见，原文保留供审计。',
     purge: '【.ai ctx purge --yes】物理清除本会话上下文，不可恢复；需要骰主并显式加 --yes。默认不影响长期记忆。',
     set: '【.ai ctx set [budget=<tokens>] [retain=<1-100>]|clr】本会话覆盖上下文预算与保留强度；budget=0 表示跟随模型窗口，clr 恢复默认。',
@@ -110,7 +110,10 @@ export interface CtxCommandInput {
     session?: CtxSessionLike;
     epId?: string;
     gid?: string;
-    runtime?: CompactionRuntime | null;
+    /** v7 归档控制器状态（A/B/C 水位、标记块、在飞总结）；未接入 v2 时缺省 */
+    archive?: ArchiveControllerStatus | null;
+    /** v7 归档控制器（手动 archive 与自动总结共用同一单飞/提交链路） */
+    archiveController?: ArchiveController | null;
     now?: () => number;
 }
 
@@ -140,14 +143,34 @@ export function formatCtxStatus(input: CtxCommandInput): string {
         ? `预算：约 ${budget} token（超长回退）`
         : (budget > 0 ? `预算：约 ${budget} token` : '预算：跟随模型窗口'));
     lines.push(`保留强度：${budgets.retainPercent}%（压缩后保留约 ${budgets.targetTokens} token 最新原文）`);
-    lines.push(`原文窗口：约 ${Math.max(0, stats.unsummarizedTokens)} token（未摘要）`);
+    const wm = input.archive?.watermarks;
+    if (wm) {
+        lines.push(`水位：L≈${wm.L} / A=${wm.A} / B=${wm.B} / C=${wm.C} token`);
+    }
+    if (input.archive?.summarizing) {
+        lines.push(`总结：进行中${input.archive.mark ? `（标记块至 e:${input.archive.mark.toSeq}）` : ''}`);
+    } else if (input.archive?.mark) {
+        lines.push(`总结：标记块待完成（至 e:${input.archive.mark.toSeq}）`);
+    }
+    lines.push(`原文窗口：约 ${Math.max(0, stats.unarchivedTokens)} token（未归档）`);
+    const archivedTokens = Math.max(0, stats.unsummarizedTokens - stats.unarchivedTokens);
+    if (stats.archivedThrough > 0) {
+        const pendingSummary = stats.archivedThrough > stats.summarizedThrough;
+        lines.push(`归档：已归档约 ${archivedTokens} token${pendingSummary ? '（部分尚未总结，原文仍可回查）' : '（原文仍可回查）'}`);
+    } else {
+        lines.push('归档：暂无');
+    }
+    if (stats.deletedThrough > 0) {
+        lines.push(`已清理原文：seq ≤ e:${stats.deletedThrough} 的原文页已物理清除（归档保留原文=关），不可检索`);
+    }
     lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
     lines.push(`超预算内容：不注入请求，原文永久保留；可用 read_raw/grep_raw 回查（展示上限约 ${budgets.retainPercent + 100}% 预算）`);
     const judgeCount = input.session?.ctxStats?.judge;
     if (typeof judgeCount === 'number' && judgeCount > 0) lines.push(`自动评分：本会话已触发 ${judgeCount} 次`);
-    const last = input.runtime?.getLastResult();
-    if (last) {
-        lines.push(`最近整理：${last.advanced ? `成功（${last.batches} 批）` : '未完成'}${last.reason ? `（${last.reason}）` : ''}`);
+    if (input.archive?.lastReason) {
+        lines.push(input.archive.lastReason === 'ok'
+            ? '最近整理：成功'
+            : `最近整理：未完成（${input.archive.lastReason}）`);
     }
     lines.push('提示：.ai ctx help 查看全部用法');
     return lines.join('\n');
@@ -226,11 +249,13 @@ export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandR
         case 'help':
             return { text: helpText(parsed.helpTopic, parsed.error) };
         case 'archive': {
-            if (!input.runtime) return { text: '暂时无法整理：摘要服务不可用' };
+            if (!input.archiveController) return { text: '暂时无法整理：摘要服务不可用' };
             const budgets = resolveContextBudgets(input.session, '');
-            const result = await input.runtime.archiveNow(budgets.targetTokens);
+            const L = input.archiveController.status().watermarks?.L ?? budgets.permanentBudget;
+            const result = await input.archiveController.archiveNow({ L, retainPercent: budgets.retainPercent });
+            const target = Math.max(0, Math.floor((L * budgets.retainPercent) / 100));
             return result.advanced
-                ? { text: `已归档 ${result.batches} 批：保留约 ${budgets.targetTokens} token 最新原文，其余压成摘要并抽取长期记忆；原文仍可回查`, changed: true }
+                ? { text: `已归档 ${result.batches ?? 0} 批：保留约 ${target} token 最新原文，其余压成摘要并抽取长期记忆；原文仍可回查`, changed: true }
                 : { text: `本次没有需要整理的内容${result.reason ? `（${result.reason}）` : ''}` };
         }
         case 'hide': {

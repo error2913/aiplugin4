@@ -98,4 +98,62 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.notEqual(toolCallEventId('g1', 'c1'), toolResultEventId('g1', 'c1'));
         assert.notEqual(toolCallEventId('g1', 'c1'), toolCallEventId('g2', 'c1'));
     },
+
+    testContextV2HeadArchivedDefaultsAndMigration() {
+        const empty = createEmptyHead();
+        assert.equal(empty.archivedThrough, 0);
+        assert.equal(empty.unarchivedTokens, 0);
+
+        // 旧档：没有 archivedThrough/unarchivedTokens → 按摘要边界等价迁移，旧行为不变
+        const old = normalizeHead({
+            version: CONTEXT_SCHEMA_VERSION,
+            epoch: 1,
+            epochStartSeq: 1,
+            nextSeq: 21,
+            persistedSeq: 20,
+            nextPageNo: 2,
+            pageFloor: 1,
+            nextRecPageNo: 1,
+            recFloor: 1,
+            summarizedThrough: 8,
+            unsummarizedTokens: 120,
+            bytesTotal: 100,
+        });
+        assert.ok(old);
+        assert.equal(old!.summarizedThrough, 8);
+        assert.equal(old!.archivedThrough, 8, '旧档按 summarizedThrough 初始化归档边界');
+        assert.equal(old!.unarchivedTokens, 120, '旧档未归档 token 用未摘要 token 近似');
+
+        // 不变式：archivedThrough 不允许低于 summarizedThrough，也不允许越过 nextSeq-1
+        const repaired = normalizeHead({
+            version: CONTEXT_SCHEMA_VERSION,
+            nextSeq: 10,
+            summarizedThrough: 5,
+            archivedThrough: 2,
+            unarchivedTokens: -3,
+        });
+        assert.ok(repaired);
+        assert.equal(repaired!.archivedThrough, 5);
+        assert.equal(repaired!.unarchivedTokens, 0);
+        const clamped = normalizeHead({
+            version: CONTEXT_SCHEMA_VERSION,
+            nextSeq: 10,
+            summarizedThrough: 2,
+            archivedThrough: 99,
+        });
+        assert.ok(clamped);
+        assert.equal(clamped!.archivedThrough, 9);
+
+        // 序列化/解析往返保留新字段
+        const roundTrip = parseHead(serializeHead({
+            ...createEmptyHead(),
+            nextSeq: 10,
+            summarizedThrough: 2,
+            archivedThrough: 4,
+            unarchivedTokens: 77,
+        }));
+        assert.ok(roundTrip);
+        assert.equal(roundTrip!.archivedThrough, 4);
+        assert.equal(roundTrip!.unarchivedTokens, 77);
+    },
 };

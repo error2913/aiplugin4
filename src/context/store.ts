@@ -26,7 +26,7 @@ import {
     parseHead,
     serializeHead,
 } from "./head";
-import { headKey } from "./keys";
+import { eventPageKey, headKey } from "./keys";
 import {
     buildEventPage,
     EVENT_PAGE_MAX_BYTES,
@@ -72,6 +72,12 @@ export interface ContextStoreOptions {
     loadRecordPages?: number;
     /** 单次 flush 最多写多少页（防御性上限） */
     maxPagesPerFlush?: number;
+    /**
+     * 归档后是否保留原文页（默认 true）。
+     * false = 「归档保留原文=关」：已摘要覆盖（seqEnd <= summarizedThrough）的事件页物理清除，
+     * pageFloor/deletedThrough 前移，之后检索不可达。
+     */
+    keepArchivedRaw?: boolean;
 }
 
 const DEFAULT_LOAD_RECENT_PAGES = 128;
@@ -108,6 +114,7 @@ export class ContextStore {
     private readonly loadRecentPages: number;
     private readonly loadRecordPagesLimit: number;
     private readonly maxPagesPerFlush: number;
+    private readonly keepArchivedRaw: boolean;
     private loadedFromPageNo = 1;
 
     private constructor(sessionId: string, head: ContextHead, opts: ContextStoreOptions = {}) {
@@ -117,6 +124,7 @@ export class ContextStore {
         this.loadRecentPages = Math.max(1, Math.floor(opts.loadRecentPages ?? DEFAULT_LOAD_RECENT_PAGES));
         this.loadRecordPagesLimit = Math.max(1, Math.floor(opts.loadRecordPages ?? 256));
         this.maxPagesPerFlush = Math.max(1, Math.floor(opts.maxPagesPerFlush ?? DEFAULT_MAX_PAGES_PER_FLUSH));
+        this.keepArchivedRaw = opts.keepArchivedRaw !== false;
     }
 
     /**
@@ -224,7 +232,9 @@ export class ContextStore {
                 recvAt: input.recvAt ?? at,
             } as unknown as ConversationEvent;
             this.head.nextSeq = seq + 1;
-            this.head.unsummarizedTokens += Math.max(0, this.estimate(event));
+            const tokens = Math.max(0, this.estimate(event));
+            this.head.unsummarizedTokens += tokens;
+            this.head.unarchivedTokens += tokens;
             this.buffer.push(event);
             this.events.push(event);
             this.trackDedup(eventId);
@@ -253,8 +263,81 @@ export class ContextStore {
         this.appendRecord(record);
         this.head.summarizedThrough = Math.max(this.head.summarizedThrough, Math.floor(summarizedThrough));
         this.head.unsummarizedTokens = Math.max(0, Math.floor(unsummarizedTokens));
+        // 摘要覆盖即对模型不可见：归档边界随摘要前进（保持 archivedThrough >= summarizedThrough）。
+        // 这样 T 的原文部分会随摘要同步下降，不会把已摘要内容继续计入触发水位。
+        if (this.head.summarizedThrough > this.head.archivedThrough) {
+            this.head.archivedThrough = this.head.summarizedThrough;
+            let unarchived = 0;
+            for (const event of this.events) {
+                if (event.seq > this.head.archivedThrough) unarchived += Math.max(0, this.estimate(event));
+            }
+            this.head.unarchivedTokens = unarchived;
+        }
+        // 「归档保留原文=关」：只清理已被摘要覆盖的页（未总结的硬切/待机归档必须保留原文，
+        // 否则后续总结无法覆盖、检索也丢失）。
+        if (!this.keepArchivedRaw) this.deleteArchivedPages();
         this.version++;
         this.emit();
+    }
+
+    /**
+     * 物理清除已被摘要覆盖的事件页（seqEnd <= summarizedThrough），并按页前缀前移 pageFloor。
+     * 只处理已落盘页（未 flush 的尾部缓冲区不动）；失败时停止（下次 flush 后重试）。
+     */
+    private deleteArchivedPages(): void {
+        const limit = this.head.summarizedThrough;
+        if (limit <= 0) return;
+        let pageNo = this.head.pageFloor;
+        let deletedThrough = this.head.deletedThrough;
+        while (pageNo < this.head.nextPageNo) {
+            let page;
+            try {
+                page = readEventPage(this.sessionId, pageNo);
+            } catch {
+                break;
+            }
+            if (!page) {
+                // 页已不存在（重复清理/损坏）：按已清理处理，继续前移
+                this.head.pageFloor = pageNo + 1;
+                pageNo += 1;
+                continue;
+            }
+            if (page.seqEnd > limit) break;
+            try {
+                getHost().storage.set(eventPageKey(this.sessionId, pageNo), '');
+            } catch {
+                break;
+            }
+            deletedThrough = Math.max(deletedThrough, page.seqEnd);
+            this.head.pageFloor = pageNo + 1;
+            pageNo += 1;
+        }
+        this.head.deletedThrough = Math.max(this.head.deletedThrough, Math.min(limit, deletedThrough));
+    }
+
+    /**
+     * 提交一次归档（硬切 / 待机归档 / 总结完成）：推进 archivedThrough 并重算未归档 token。
+     *
+     * - 只进不退、幂等：目标 <= 当前 archivedThrough 时是空操作；
+     * - 「未归档 token」按内存窗口中 seq > archivedThrough 的事件重算（归档起点来自已加载单元，
+     *   因此更早的未加载事件都落在边界之前）；
+     * - 只改内存与脏标记，持久化由下一次 flush 完成。
+     *
+     * @returns 实际生效的 archivedThrough
+     */
+    commitArchive(toSeq: number): number {
+        const raw = Number.isFinite(toSeq) ? Math.floor(toSeq) : 0;
+        const target = Math.max(this.head.archivedThrough, Math.min(this.head.nextSeq - 1, raw));
+        if (target <= this.head.archivedThrough) return this.head.archivedThrough;
+        this.head.archivedThrough = target;
+        let unarchived = 0;
+        for (const event of this.events) {
+            if (event.seq > target) unarchived += Math.max(0, this.estimate(event));
+        }
+        this.head.unarchivedTokens = unarchived;
+        this.version++;
+        this.emit();
+        return target;
     }
 
     private addRecordToMemory(record: RecordEntry): void {

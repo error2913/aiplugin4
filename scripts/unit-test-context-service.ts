@@ -102,26 +102,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(grep.hits[0].seq, 1);
     },
 
-    async testContextServiceCompact() {
-        const sid = 'QQ:service-5';
-        const service = await openService(sid);
-        for (let i = 1; i <= 4; i++) service.appendUser('QQ:1', `m${i}`, [{ type: 'text', text: `消息${i}` }]);
-        const result = await service.compact(
-            { batchTokens: 30, summaryMaxChars: 500 },
-            {
-                summarize: () => '这是摘要',
-                estimateEventTokens,
-                now: () => 100,
-            },
-        );
-        assert.equal(result.advanced, true);
-        assert.equal(result.record?.text, '这是摘要');
-        await service.flush();
-        const reopened = await ContextService.open(sid);
-        assert.equal(reopened.snapshot().records.length, 1);
-        assert.ok(reopened.head().summarizedThrough >= 2);
-    },
-
     async testContextServiceCompileObserveAndReset() {
         const service = await openService('QQ:service-6');
         service.appendUser('QQ:1', 'm1', [{ type: 'text', text: '一' }]);

@@ -600,7 +600,7 @@ function truncateUnit(
 }
 
 /** 摘要区间是否与 edit/redact 相交：相交时摘要文本可能过期，回退旧行为（原文优先，摘要只作预算兜底） */
-function summaryIsStale(index: RecordIndex, summary: SummaryRecord): boolean {
+export function summaryIsStale(index: RecordIndex, summary: SummaryRecord): boolean {
     for (const seq of index.edits.keys()) {
         if (seq >= summary.fromSeq && seq <= summary.toSeq) return true;
     }
@@ -642,20 +642,32 @@ export function compileRequest(options: CompileOptions): CompileResult {
     const visible = applyVisibility(options.snapshot.events, index);
     const allUnits = segmentUnits(visible);
 
-    // 摘要边界（单元感知：工具组可能晚到，不能按事件 seq 细切）
+    // 可见性边界（单元感知：工具组可能晚到，不能按事件 seq 细切）：
+    // - 摘要边界：已摘要内容不再以原文出现；
+    // - 归档边界：硬切/待机归档（可能没有摘要）也不再以原文出现。
+    // 两者取较大值作为隐藏边界；摘要仍只负责注入文本，不改变可见性判定。
     const latest = latestSummary(index, Number.MAX_SAFE_INTEGER);
     const stale = latest ? summaryIsStale(index, latest) : false;
     let summary: SummaryRecord | null = null;
     let summaryBoundarySeq = 0;
-    let units = allUnits;
     if (latest && !stale && latest.toSeq >= index.epochStartSeq) {
-        const filtered = allUnits.filter(unit => unit.toSeq > latest.toSeq);
+        summary = latest;
+        summaryBoundarySeq = latest.toSeq;
+    }
+    const archRaw = Number(options.snapshot.head?.archivedThrough ?? 0);
+    const archivedThrough = Number.isFinite(archRaw) ? Math.max(0, Math.floor(archRaw)) : 0;
+    const hiddenBoundarySeq = Math.max(summaryBoundarySeq, archivedThrough);
+    let units = allUnits;
+    if (hiddenBoundarySeq > 0) {
+        const filtered = allUnits.filter(unit => unit.toSeq > hiddenBoundarySeq);
         if (filtered.length > 0) {
             units = filtered;
-            summary = latest;
-            summaryBoundarySeq = latest.toSeq;
+        } else {
+            // 防御：过滤后为空（脏数据/边界越过最新）→ 保持旧行为，不隐藏任何内容
+            units = allUnits;
+            summary = null;
+            summaryBoundarySeq = 0;
         }
-        // 防御：过滤后为空（脏数据/摘要覆盖到最新）→ 保持旧行为，不隐藏任何内容
     }
 
     const selected: ConversationUnit[] = [];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import Agent from '../src/agent/agent';
 import Config from '../src/config/config';
-import { compactionRuntimeFor, resetCompactionRuntime } from '../src/context/compact/session_runtime';
+import { archiveControllerFor, resetArchiveController } from '../src/context/compact/session_runtime';
 import { setArchiveFactsSink } from '../src/core/ports/archive_facts';
 import { getHost, setHost } from '../src/core/host';
 import { setAuxLlm } from '../src/core/ports/aux_llm';
@@ -56,6 +56,13 @@ function combinedReply(facts: any[] = []) {
     return JSON.stringify({ summary: '这是滚动摘要', facts });
 }
 
+/** 归档唯一入口（v7）：自动与手动共用同一 controller。 */
+function archiveNow(session: any) {
+    const controller = archiveControllerFor(session);
+    assert.ok(controller, '接入事件账本后应能取到归档控制器');
+    return controller!.archiveNow({ L: 1000, retainPercent: 30 });
+}
+
 /** 等待异步副作用（fire-and-forget 的后台摘要） */
 async function waitForCondition(predicate: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
     const start = Date.now();
@@ -85,8 +92,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any);
         try {
             const session = await makeSession('QQ:archive-combined');
-            resetCompactionRuntime(session);
-            const result = await compactionRuntimeFor(session)!.archiveNow(1);
+            resetArchiveController(session);
+            const result = await archiveNow(session);
             assert.equal(result.advanced, true);
             await session.contextV2!.flush();
             const summaries = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
@@ -118,8 +125,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any);
         try {
             const session = await makeSession('QQ:archive-draft');
-            resetCompactionRuntime(session);
-            const first = await compactionRuntimeFor(session)!.archiveNow(1);
+            resetArchiveController(session);
+            const first = await archiveNow(session);
             assert.equal(first.advanced, true, 'facts 写失败不阻塞摘要提交');
             const draftKey = 'archive_draft:QQ:archive-draft';
             const draft = JSON.parse(getHost().storage.get(draftKey) || '{}');
@@ -130,7 +137,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 await session.context.addUserMessage({} as seal.MsgContext, `后续消息 ${i} `.repeat(800), 'QQ:1', `mb2-${i}`);
             }
             fail = false;
-            await compactionRuntimeFor(session)!.archiveNow(1);
+            await archiveNow(session);
             assert.ok(applied >= 1, '重放应补写 facts（不重调 LLM）');
             const after = getHost().storage.get(draftKey);
             assert.ok(!after, '成功重放后草稿应清除');
@@ -152,12 +159,13 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any);
         try {
             const session = await makeSession('QQ:archive-bad-json');
-            resetCompactionRuntime(session);
-            const result = await compactionRuntimeFor(session)!.archiveNow(1);
+            resetArchiveController(session);
+            const result = await archiveNow(session);
             assert.equal(result.advanced, false);
             assert.equal(result.reason, 'summary-error');
             assert.equal(calls, 1, '解析失败不做后备，只调一次');
             assert.equal(session.contextV2!.snapshot().records.filter(r => r.kind === 'summary').length, 0, '不提交摘要');
+            assert.ok(session.contextV2!.head().archivedThrough > 0, '报错也归档标记块（契约：原文仍可检索）');
         } finally {
             setAuxLlm(null);
             setArchiveFactsSink(null);
@@ -174,8 +182,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         try {
             const session = await makeSession('QQ:bridge-compact');
-            resetCompactionRuntime(session);
-            const result = await compactionRuntimeFor(session)!.archiveNow(1);
+            resetArchiveController(session);
+            const result = await archiveNow(session);
             assert.equal(result.advanced, true);
             await session.contextV2!.flush();
             const summaries = session.contextV2!.snapshot().records.filter(r => r.kind === 'summary');
@@ -264,8 +272,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /**
-     * 自动归档与手动 `.ai ctx archive` 必须共用同一 CompactionRuntime：
-     * 两个“单飞”互不可见时，可同时对同一批未摘要事件 compactOnce → 重复摘要/重复计费。
+     * 自动归档与手动 `.ai ctx archive` 必须共用同一 ArchiveController：
+     * 两个“单飞”互不可见时，可同时对同一批未摘要事件摘要 → 重复摘要/重复计费。
      */
     async testContextBridgeSharedRuntimeSingleFlight() {
         installHost();
@@ -285,28 +293,25 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any);
         try {
             const session = await makeSession('QQ:bridge-single-flight');
-            resetCompactionRuntime(session);
-            const runtime = compactionRuntimeFor(session);
-            assert.ok(runtime, '接入事件账本后应能取到共享运行时');
-            assert.equal(compactionRuntimeFor(session), runtime, '自动路径与手动 archive 必须复用同一个 runtime');
+            resetArchiveController(session);
+            const controller = archiveControllerFor(session);
+            assert.ok(controller, '接入事件账本后应能取到归档控制器');
+            assert.equal(archiveControllerFor(session), controller, '自动路径与手动 archive 必须复用同一 controller');
 
-            const auto = runtime!.maybeRun(1);
-            await waitForCondition(() => summarizeCalls === 1, '自动摘要请求已发出');
-            const manual = await runtime!.archiveNow(1);
-            assert.equal(manual.ran, false, '自动摘要在飞时手动 archive 不得并发执行');
+            const first = controller!.archiveNow({ L: 1000, retainPercent: 30 });
+            await waitForCondition(() => summarizeCalls === 1, '摘要请求已发出');
+            const manual = await controller!.archiveNow({ L: 1000, retainPercent: 30 });
+            assert.equal(manual.advanced, false, '在飞总结期间手动 archive 不得并发执行');
             assert.equal(manual.reason, 'running');
             assert.equal(summarizeCalls, 1, '被单飞挡下的手动调用不得额外调用摘要器');
 
             release!();
-            const autoResult = await auto;
-            assert.equal(autoResult.advanced, true);
+            const firstResult = await first;
+            assert.equal(firstResult.advanced, true);
             assert.ok(summarizeCalls >= 1);
 
-            const after = await runtime!.archiveNow(1);
-            assert.equal(after.ran, true);
-
-            resetCompactionRuntime(session);
-            assert.notEqual(compactionRuntimeFor(session), runtime, 'reset 后应重建 runtime');
+            resetArchiveController(session);
+            assert.notEqual(archiveControllerFor(session), controller, 'reset 后应重建控制器');
         } finally {
             setAuxLlm(null);
         }

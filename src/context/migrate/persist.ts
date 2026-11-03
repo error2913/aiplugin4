@@ -155,6 +155,9 @@ export function migrateLegacySession(
     head.unsummarizedTokens = opts.estimateEventTokens
         ? build.events.reduce((n, e) => n + Math.max(0, opts.estimateEventTokens!(e)), 0)
         : 0;
+    head.archivedThrough = 0;
+    head.unarchivedTokens = head.unsummarizedTokens;
+    head.deletedThrough = 0;
     head.bytesTotal = bytesTotal;
     head.legacy = build.legacyIndex;
 

@@ -472,4 +472,43 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(text.length < 4 * 6400, `应实际截断文本（实际 ${text.length} / 25600 字符）`);
         assert.ok(text.includes('…'), '截断文本应带省略号/指针标记');
     },
+
+    testContextV2CompileHidesArchivedWithoutSummary() {
+        const events = [userEvent(1, 'one'), assistantEvent(2, 'two'), userEvent(3, 'three'), assistantEvent(4, 'four')];
+        const archivedSnapshot: ContextSnapshot = {
+            ...snapshot(events),
+            head: { ...HEAD, archivedThrough: 2, nextSeq: 5 },
+        };
+        const result = compileRequest({ ...baseOptions, snapshot: archivedSnapshot, budgetTokens: 1000 });
+        const text = textOf(result.messages);
+        assert.ok(!text.includes('one') && !text.includes('two'), '归档块（即使没有摘要）也不得以原文出现');
+        assert.ok(text.includes('three') && text.includes('four'), '未归档内容照常可见');
+        assert.equal(result.stats.summaryInjected, false);
+        assert.equal(result.stats.gapInjected, true, '无摘要归档块必须有缺口提示，不能静默');
+        assert.ok(text.includes('read_raw'), '缺口提示带 read_raw 回查指针');
+    },
+
+    testContextV2CompileArchivedBeyondSummaryKeepsCoverageGap() {
+        const events = [userEvent(1, 'one'), assistantEvent(2, 'two'), userEvent(3, 'three'), assistantEvent(4, 'four'), userEvent(5, 'five')];
+        const records = [{
+            kind: 'summary' as const,
+            id: 'sum:1',
+            at: 10,
+            epoch: 1,
+            fromSeq: 1,
+            toSeq: 1,
+            text: '摘要A',
+        }];
+        const archivedSnapshot: ContextSnapshot = {
+            ...snapshot(events, records),
+            head: { ...HEAD, summarizedThrough: 1, archivedThrough: 3, nextSeq: 6 },
+        };
+        const result = compileRequest({ ...baseOptions, snapshot: archivedSnapshot, budgetTokens: 1000 });
+        const text = textOf(result.messages);
+        assert.ok(text.includes('摘要A'), '摘要仍注入');
+        assert.ok(!text.includes('two') && !text.includes('three'), '归档但未总结的区间也不以原文出现');
+        assert.ok(text.includes('four') && text.includes('five'));
+        assert.equal(result.stats.summaryBoundarySeq, 1);
+        assert.equal(result.stats.gapInjected, true, '摘要边界与归档边界之间的未总结区间必须有缺口提示');
+    },
 };

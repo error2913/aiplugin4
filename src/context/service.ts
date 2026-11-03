@@ -1,13 +1,6 @@
 // Context v2 门面：对外只暴露"会话上下文"这一件事。
 // 上层（Session/Agent/命令/工具/子代理）通过这里写入、取投影、编译请求、召回、压缩；
 // 不直接碰 store/page 细节。
-import {
-    ArchiveDraft,
-    CompactDeps,
-    compactOnce,
-    CompactOptions,
-    CompactResult,
-} from "./compact/compactor";
 import type { ConversationEvent, EventInput, Part, RecordEntry } from "./events";
 import {
     assistantEventId,
@@ -36,6 +29,23 @@ export class ContextService {
     private readonly store: ContextStore;
     /** 最近一次编译的统计（仅运行时状态，不持久化）：用于「预算到顶」触发压缩 */
     private lastCompileStats: CompileStats | null = null;
+    /**
+     * 「归档保留原文」配置提供者（装配层注入，避免 context 层 import config）。
+     * 打开会话时若调用方未显式传 keepArchivedRaw，则向它取值。
+     */
+    private static archivedRawProvider: (() => boolean) | null = null;
+
+    /** 装配层（index.ts）注入归档保留原文开关；不 import Config，避免跨层依赖 */
+    static configureArchivedRetention(provider: () => boolean): void {
+        ContextService.archivedRawProvider = provider;
+    }
+
+    private static resolveOptions(options: ContextServiceOptions): ContextServiceOptions {
+        if (options.keepArchivedRaw !== undefined || !ContextService.archivedRawProvider) return options;
+        let keepArchivedRaw = true;
+        try { keepArchivedRaw = ContextService.archivedRawProvider() !== false; } catch { /* 配置不可用时按默认保留 */ }
+        return { ...options, keepArchivedRaw };
+    }
 
     private constructor(sessionId: string, store: ContextStore) {
         this.sessionId = sessionId;
@@ -44,13 +54,13 @@ export class ContextService {
 
     /** 打开会话：读 head/页/记录；不存在则返回空（迁移由调用方先做） */
     static async open(sessionId: string, options: ContextServiceOptions = {}): Promise<ContextService> {
-        const store = await ContextStore.open(sessionId, options);
+        const store = await ContextStore.open(sessionId, ContextService.resolveOptions(options));
         return new ContextService(sessionId, store);
     }
 
     /** 同步打开：Session 恢复路径（存储读取本身是同步的） */
     static openSync(sessionId: string, options: ContextServiceOptions = {}): ContextService {
-        return new ContextService(sessionId, ContextStore.openSync(sessionId, options));
+        return new ContextService(sessionId, ContextStore.openSync(sessionId, ContextService.resolveOptions(options)));
     }
 
     getStore(): ContextStore {
@@ -63,6 +73,16 @@ export class ContextService {
 
     head(): Readonly<ContextHead> {
         return this.store.getHead();
+    }
+
+    /** 提交归档水位（硬切/待机归档/总结完成共用）：只进不退，返回实际 archivedThrough */
+    commitArchive(toSeq: number): number {
+        return this.store.commitArchive(toSeq);
+    }
+
+    /** 提交滚动摘要（推进 summarizedThrough，并同步推进归档边界；由归档控制器调用） */
+    commitSummary(record: RecordEntry, summarizedThrough: number, unsummarizedTokens: number): void {
+        this.store.commitSummary(record, summarizedThrough, unsummarizedTokens);
     }
 
     /** 同步追加事件；返回采纳的 seq */
@@ -224,97 +244,6 @@ export class ContextService {
 
     grep(pattern: string, options: GrepOptions = {}): GrepRawResult {
         return grepRaw(this.store, this.store.snapshot(), pattern, options);
-    }
-
-    /** 一次压缩；成功会写入内存记录，需 flush 持久化 */
-    async compact(options: CompactOptions, deps: CompactDeps): Promise<CompactResult> {
-        const replayed = await this.replayArchiveDraft(deps);
-        if (replayed) return replayed;
-        const result = await compactOnce({
-            events: this.store.snapshot().events,
-            records: this.store.snapshot().records,
-            head: this.store.getHead(),
-        }, options, deps);
-        if (result.advanced && result.record) {
-            const facts = Array.isArray(result.facts) ? result.facts : [];
-            const info = { epoch: result.record.epoch, fromSeq: result.record.fromSeq, toSeq: result.record.toSeq };
-            if (facts.length > 0 && deps.applyFacts) {
-                const draft: ArchiveDraft = {
-                    info,
-                    summaryText: result.record.text,
-                    recordId: result.record.id,
-                    at: result.record.at,
-                    fromAt: result.record.fromAt,
-                    toAt: result.record.toAt,
-                    unsummarizedTokens: result.unsummarizedTokens,
-                    facts,
-                    applied: false,
-                };
-                // 两阶段：先落草稿 → 提交摘要 → 写 facts；facts 失败时草稿留待重放（不阻塞归档）
-                deps.saveArchiveDraft?.(draft);
-                this.store.commitSummary(result.record, result.through, result.unsummarizedTokens);
-                try {
-                    await deps.applyFacts(facts, info);
-                    draft.applied = true;
-                    deps.saveArchiveDraft?.(draft);
-                    deps.clearArchiveDraft?.();
-                } catch { /* 保留草稿，下一次 compact 入口重放 */ }
-            } else {
-                this.store.commitSummary(result.record, result.through, result.unsummarizedTokens);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * 两阶段草稿重放：崩溃/写库失败后不重调 LLM，用同一 payload 补提交摘要 + 补写 facts。
-     * @returns 重放结果（没有草稿返回 null）
-     */
-    private async replayArchiveDraft(deps: CompactDeps): Promise<CompactResult | null> {
-        const draft = deps.loadArchiveDraft?.();
-        if (!draft) return null;
-        const head = this.store.getHead();
-        if (draft.info.toSeq > head.summarizedThrough) {
-            this.store.commitSummary({
-                id: draft.recordId,
-                at: draft.at,
-                kind: 'summary',
-                epoch: draft.info.epoch,
-                fromSeq: draft.info.fromSeq,
-                toSeq: draft.info.toSeq,
-                text: draft.summaryText,
-                fromAt: draft.fromAt,
-                toAt: draft.toAt,
-            }, draft.info.toSeq, draft.unsummarizedTokens);
-        }
-        if (deps.applyFacts && !draft.applied) {
-            try {
-                await deps.applyFacts(draft.facts, draft.info);
-                draft.applied = true;
-                deps.saveArchiveDraft?.(draft);
-            } catch {
-                // 继续保留草稿；本次按已推进返回，runtime 会 flush 已提交的摘要
-                return {
-                    advanced: true,
-                    record: null,
-                    through: draft.info.toSeq,
-                    unsummarizedTokens: draft.unsummarizedTokens,
-                    batch: null,
-                    inputChars: 0,
-                    truncated: false,
-                };
-            }
-        }
-        deps.clearArchiveDraft?.();
-        return {
-            advanced: true,
-            record: null,
-            through: draft.info.toSeq,
-            unsummarizedTokens: draft.unsummarizedTokens,
-            batch: null,
-            inputChars: 0,
-            truncated: false,
-        };
     }
 
     async flush(): Promise<Awaited<ReturnType<ContextStore['flush']>>> {

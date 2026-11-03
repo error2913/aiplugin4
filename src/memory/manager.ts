@@ -1,5 +1,5 @@
 // 兼容门面：旧调用方仍可 import MemoryManager；新代码用 MemoryService。
-// summarizeChunk* 仅为历史测试/legacy 路径保留，运行路径已改用 context_bridge + scheduler。
+// summarizeChunk* 仅为历史测试/legacy 路径保留，运行路径已改用归档控制器 + scheduler。
 import Config from "../config/config";
 import type { Session } from "../session/session";
 

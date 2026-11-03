@@ -12,6 +12,7 @@ export default class ContextConfig {
         seal.ext.registerIntConfig(ext, "上下文预算", 131072, "上下文 token 预算；0=跟随报错探测到的模型真实窗口×0.8（未探测到回退 100 万）", "上下文");
         seal.ext.registerIntConfig(ext, "保留强度", DEFAULT_RETAIN_PERCENT, "最近原文保留占上下文预算的百分比（1-100）；压缩后保留这个比例的最新原文，其余滚动摘要；同时作为消息标签边界", "上下文");
         seal.ext.registerIntConfig(ext, "待机入库配额", 0, "待机会话每小时最多入库多少条普通群消息（0=不限）", "上下文");
+        seal.ext.registerBoolConfig(ext, "归档保留原文", true, "归档后是否保留原文页；关闭（=关）时已由滚动摘要覆盖的归档页会被物理清除、之后 read_raw/grep_raw 不可达（省存储，不省 LLM）", "上下文");
     }
 
     static get() {
@@ -25,6 +26,7 @@ export default class ContextConfig {
             BUDGET_TOKENS: seal.ext.getIntConfig(ext, "上下文预算"),
             RETAIN_PERCENT: retainPercent,
             STANDBY_QUOTA: Math.max(0, seal.ext.getIntConfig(ext, "待机入库配额")),
+            KEEP_ARCHIVED_RAW: seal.ext.getBoolConfig(ext, "归档保留原文"),
         };
     }
 }

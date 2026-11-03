@@ -2,6 +2,7 @@
 // 从 session.ts 拆出：这些是「收信与排空」策略，只操作 session.context / pendingQueue / noticeQueue，
 // 与聊天编排（chat/stream）解耦；session.ts 保留同名方法委派，外部调用点零改动。
 // 注意：媒体任务的「已送达」回置通过参数注入（不 import media 实现），避免把媒体模块拉进会话环。
+import { archiveControllerFor } from "../context/compact/session_runtime";
 import { markMediaNotified } from "../core/ports/media_notice";
 import { logger } from "../logger";
 import { getRecordMessageId } from "../utils/message_id";
@@ -22,6 +23,10 @@ export async function handleReceipt(session: Session, ctx: seal.MsgContext, msg:
     session.noteInboundRef(ctx, msg, opts?.updateRef !== false);
     const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
     await session.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
+    // v7 待机路径：非忙态入库后，T ≥ C 时零 LLM 归档（总结在飞时控制器自行跳过）
+    if (!session.running && !session.starting) {
+        try { archiveControllerFor(session)?.onIdleAppend(); } catch { /* 归档失败不影响入库 */ }
+    }
 }
 
 /** 会话忙时挂起消息：与 handleReceipt 等价但不入库，进入 pendingQueue 由 flushPending 统一处理（不触发并发） */

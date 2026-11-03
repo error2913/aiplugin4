@@ -2,14 +2,12 @@
 import assert from 'node:assert/strict';
 
 import Config from '../src/config/config';
-import Agent from '../src/agent/agent';
 import { PRIVILEGE_LEVEL_MAP } from '../src/config/static_config';
 import { registerCmdCtx } from '../src/cmd/sub_cmd/ctx';
 import { SubCmd } from '../src/cmd/root_cmd';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { getHost, setHost } from '../src/core/host';
-import { setAuxLlm } from '../src/core/ports/aux_llm';
 import { SessionService } from '../src/session/session_service';
 import { Session } from '../src/session/session';
 import { sessionStorageKey } from '../src/session/persistence';
@@ -157,135 +155,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await solve(['ctx', 'archive', 'help']);
         assert.ok(replied[2].includes('手动归档'), replied[2]);
 
-        // purge = 新 context epoch：归档冷却标记重置
-        session.ctxAutoSummaryBlockedUntil = Date.now() + 60_000;
+        // purge = 新 context epoch：内存服务重建、新写入可持久化
         await solve(['ctx', 'purge'], [{ name: 'yes' }]);
         assert.ok(replied[3].includes('已清除'), replied[3]);
-        assert.equal(session.ctxAutoSummaryBlockedUntil, 0, 'purge 后归档冷却应重置');
+        assert.equal(session.contextV2!.snapshot().events.length, 0, 'purge 后内存服务应重建为空');
         assert.equal(session.contextV2!.snapshot().events.length, 0, 'purge 后内存服务应重建为空');
         await session.context.addUserMessage({} as seal.MsgContext, '清除后的新消息', 'QQ:1', 'cm2');
         assert.equal(session.contextV2!.snapshot().events.length, 1);
         const reopened = await ContextService.open(sid);
         assert.equal(reopened.snapshot().events.length, 1, 'purge 后新写入应持久化');
-    },
-
-    /**
-     * 自动归档可重复（P0-4 去掉「每会话一次」额度）：
-     * 第一次预算到顶触发成功后，再次攒出超目标未摘要原文仍会继续归档。
-     */
-    async testAutoSummaryQuotaUsedOnce(): Promise<void> {
-        let auxCalls = 0;
-        setAuxLlm({
-            chat: async () => { auxCalls++; return '滚动摘要'; },
-            chatMessages: async () => '',
-        } as any);
-        try {
-            const h = makeQuotaHarness({ pending: 100_000, omitted: 1 });
-            h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '第一次自动归档落地');
-            assert.equal(auxCalls, 1);
-            assert.equal(h.session.ctxAutoSummaryInFlight, false, '落地后应清掉在飞标记');
-            assert.equal(h.state.pending, 0, '摘要推进到目标以下');
-            assert.equal(h.state.lastBatchTokens, 6000, '目标 30000（预算 100000×30%），单批按 COMPACT_BATCH_TOKENS=6000 截断');
-
-            // 不再有「每会话一次」限额：再次超目标仍会归档
-            h.state.pending = 100_000;
-            h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => h.state.compacts === 2, '第二次自动归档');
-            assert.equal(auxCalls, 2, '归档可重复，不再受一次性额度限制');
-        } finally {
-            setAuxLlm(null);
-        }
-    },
-
-    /** 自动归档失败（aux 返回空）后退避：不立即重试、不提交摘要 */
-    async testAutoSummaryQuotaRefundOnFailure(): Promise<void> {
-        let auxCalls = 0;
-        setAuxLlm({
-            chat: async () => { auxCalls++; return null; },
-            chatMessages: async () => '',
-        } as any);
-        try {
-            const h = makeQuotaHarness({ pending: 100_000, omitted: 1 });
-            h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '第一次归档失败返回');
-            assert.equal(auxCalls, 1);
-
-            // 失败进入 runtime backoff → 立即再触发不再调用
-            h.agent.scheduleContextCompaction(h.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(auxCalls, 1, '失败后退避，不立即重试');
-            assert.equal(h.state.compacts, 1);
-        } finally {
-            setAuxLlm(null);
-        }
-    },
-
-    /** 自动摘要门闩：未发生预算裁剪 / 未超保留目标 / 已在飞 / 未接入账本 → 都不发起 */
-    async testAutoSummaryGateConditions(): Promise<void> {
-        let auxCalls = 0;
-        setAuxLlm({
-            chat: async () => { auxCalls++; return '滚动摘要'; },
-            chatMessages: async () => '',
-        } as any);
-        try {
-            // 1) 本轮编译没有发生预算裁剪（omittedFromSeq=null）→ 不摘要
-            const notOmitted = makeQuotaHarness({ pending: 100_000, omitted: null });
-            notOmitted.agent.scheduleContextCompaction(notOmitted.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(notOmitted.state.compacts, 0, '未预算裁剪不应触发摘要');
-
-            // 2) 未摘要原文未超过保留目标 → 不空跑
-            const belowTarget = makeQuotaHarness({ pending: 10_000, omitted: 1 });
-            belowTarget.agent.scheduleContextCompaction(belowTarget.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(belowTarget.state.compacts, 0, 'pending <= target 不应触发摘要');
-
-            // 3) 已有摘要发起未落地（inFlight）→ 不重复触发
-            const inFlight = makeQuotaHarness({ pending: 100_000, omitted: 1 });
-            inFlight.session.ctxAutoSummaryInFlight = true;
-            inFlight.agent.scheduleContextCompaction(inFlight.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(inFlight.state.compacts, 0, 'inFlight 时不得重复触发');
-
-            // 4) 未接入事件账本（无 contextV2）→ 直接返回
-            const noService = makeQuotaHarness({ pending: 100_000, omitted: 1 });
-            noService.session.contextV2 = null;
-            noService.agent.scheduleContextCompaction(noService.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(noService.state.compacts, 0);
-            assert.equal(auxCalls, 0, '以上门闩条件均不应调用 aux LLM');
-        } finally {
-            setAuxLlm(null);
-        }
-    },
-
-    /** 自动摘要单飞：已发起未落地期间再次触发（如并发 run/finally 重入）不重复发起 */
-    async testAutoSummarySingleFlight(): Promise<void> {
-        let auxCalls = 0;
-        let release: (() => void) | null = null;
-        setAuxLlm({
-            chat: async () => {
-                auxCalls++;
-                await new Promise<void>(resolve => { release = resolve; });
-                return '滚动摘要';
-            },
-            chatMessages: async () => '',
-        } as any);
-        try {
-            const h = makeQuotaHarness({ pending: 100_000, omitted: 1 });
-            h.agent.scheduleContextCompaction(h.session);
-            await waitFor(() => auxCalls === 1, '摘要请求已发出');
-            assert.equal(h.session.ctxAutoSummaryInFlight, true);
-            h.agent.scheduleContextCompaction(h.session);
-            await new Promise(resolve => setTimeout(resolve, 30));
-            assert.equal(auxCalls, 1, 'inFlight 期间不得并发发起第二次摘要');
-            release!();
-            await waitFor(() => h.state.compacts === 1 && h.session.ctxAutoSummaryInFlight === false, '摘要落地');
-            assert.equal(h.session.ctxAutoSummaryInFlight, false);
-        } finally {
-            setAuxLlm(null);
-        }
     },
 
     /**
@@ -339,70 +217,3 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 };
 
-// ---------------- 自动摘要额度测试工具 ----------------
-
-/** 等待 fire-and-forget 的异步副作用（scheduleContextCompaction 返回 void） */
-async function waitFor(predicate: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
-    const start = Date.now();
-    while (!predicate()) {
-        if (Date.now() - start > timeoutMs) throw new Error(`等待超时：${label}`);
-        await new Promise(resolve => setTimeout(resolve, 5));
-    }
-}
-
-interface QuotaHarness {
-    agent: any;
-    session: any;
-    state: { pending: number; compacts: number; saves: number; lastBatchTokens: number };
-}
-
-/**
- * 构造只实现 `Agent.scheduleContextCompaction` 所需表面的会话：
- * contextV2 门面（lastCompile/head/compact/flush）+ 额度字段 + save。
- * 预算用会话覆盖 100000（保留强度默认 30% → 目标 30000），与全局配置解耦。
- */
-function makeQuotaHarness(opts: { pending: number; omitted: number | null }): QuotaHarness {
-    const state = { pending: opts.pending, compacts: 0, saves: 0, lastBatchTokens: 0 };
-    const service: any = {
-        lastCompile: () => ({ omittedFromSeq: opts.omitted, omittedToSeq: opts.omitted }),
-        head: () => ({ unsummarizedTokens: state.pending }),
-        compact: async (options: any, deps: any) => {
-            state.compacts++;
-            state.lastBatchTokens = options?.batchTokens;
-            const text = await deps.summarize('batch-input');
-            if (typeof text !== 'string' || !text.trim()) {
-                return {
-                    advanced: false,
-                    reason: 'empty-summary',
-                    record: null,
-                    through: 0,
-                    unsummarizedTokens: state.pending,
-                    batch: null,
-                    inputChars: 0,
-                    truncated: false,
-                };
-            }
-            state.pending = 0;
-            return {
-                advanced: true,
-                record: { kind: 'summary', id: 'sum:1', at: 1, epoch: 1, fromSeq: 1, toSeq: 2, text },
-                through: 2,
-                unsummarizedTokens: 0,
-                batch: null,
-                inputChars: 10,
-                truncated: false,
-            };
-        },
-        flush: async () => ({ ok: true }),
-    };
-    const session: any = {
-        sessionId: '',
-        agentName: '*',
-        contextV2: service,
-        setting: { overrides: { ctxBudgetTokens: 100_000 } },
-        ctxAutoSummaryInFlight: false,
-        ctxAutoSummaryBlockedUntil: 0,
-        save: () => { state.saves++; },
-    };
-    return { agent: Object.create(Agent.prototype), session, state };
-}

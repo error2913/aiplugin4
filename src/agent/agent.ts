@@ -1,12 +1,12 @@
 // 智能体（Agent）：角色配置 + 会话服务，chat() 按 use 选择模型发起对话
 import { savePurposeModelOverrides } from "../config/apply/model";
 import Config from "../config/config";
+import { archiveControllerFor } from "../context/compact/session_runtime";
 import { getHost } from "../core/host";
 import { setAgentResolver } from "../core/ports/agent_registry";
 import Logger from "../logger";
 import { MediaTaskManager } from "../media/task_queue";
 import { ApiError, computeArchiveTarget, isImageDownloadFailure, isImageRejectedFailure, KIND_LABEL, parseImageErrorPosition, parseMaxContextTokens, resolveEffectiveMaxTokens } from "../model/api_error";
-import { isAuxPaused } from "../model/aux_breaker";
 import { pickNextModel } from "../model/fallback";
 import Model, { ModelEntry } from "../model/model";
 import { ChatModelUse } from "../model/types";
@@ -22,7 +22,6 @@ import { ToolName } from "../tool/tool";
 import Tool from "../tool/tool";
 import { ToolInfo } from "../tool/types";
 import { requestLimiter } from "../utils/concurrency";
-import { resolveContextBudgets } from "../utils/context_budget";
 import { collectImageUrls, createImageTrace, handleMessages, ImageTraceState, RequestMessage, sanitizeChatMessages, textToMultimodalContent } from "../utils/message";
 import { SYSTEM_NAME } from "../utils/protocol";
 import { revive, TypeDescriptor } from "../utils/revive";
@@ -31,7 +30,6 @@ import { checkRepeat, handleReply } from "../utils/string";
 import { StopError } from "../utils/timeout";
 import { resetStopEvent } from "../utils/timeout";
 
-import { compactContextV2 } from "./context_bridge";
 import { MemoryScheduler } from "./memory_scheduler";
 import { AgentRunContext } from "./run_context";
 import { streamService } from "./stream";
@@ -117,7 +115,7 @@ export default class Agent {
     private async settleBacklog(session: Session): Promise<void> {
         try {
             if (session.contextV2) {
-                // contextV2：记忆抽取已并入「归档」（见 scheduleContextCompaction → compactContextV2）；
+                // contextV2：记忆抽取已并入「归档」（见 ArchiveController 的并发总结）；
                 // 这里不再收集/抽取原文，零 LLM。
                 return;
             }
@@ -127,49 +125,6 @@ export default class Agent {
         }
     }
 
-    /**
-     * 预算到顶后的自动归档（滚动摘要 + 记忆 facts 同一请求）。
-     * 触发条件（全部满足）：
-     * - 没有在飞（`ctxAutoSummaryInFlight`）；
-     * - 本轮编译确实发生了预算裁剪（`lastCompile()` 非空且 `omittedFromSeq !== null`）；
-     * - 仍有未摘要原文超过保留目标（`unsummarizedTokens > targetTokens`，避免空跑）。
-     * 同一 epoch 可反复归档（不再有「每会话一次」额度）；失败由 runtime 退避。
-     */
-    private scheduleContextCompaction(session: Session): void {
-        const service = session.contextV2;
-        if (!service) return;
-        if (session.ctxAutoSummaryInFlight) return;
-        if (isAuxPaused()) return;
-        if (session.ctxAutoSummaryBlockedUntil > Date.now()) return;
-
-        const stats = service.lastCompile();
-        if (!stats || stats.omittedFromSeq === null) return;
-
-        const budgets = resolveContextBudgets(session, Model.getChatModel('chat')?.name || '');
-        const pending = service.head().unsummarizedTokens;
-        if (pending <= budgets.targetTokens) return;
-
-        session.ctxAutoSummaryInFlight = true;
-        void compactContextV2(session, budgets.targetTokens)
-            .then(result => {
-                session.ctxAutoSummaryInFlight = false;
-                if (result?.advanced) {
-                    session.save();
-                    log.info(`[ctx-compact] 自动归档：${result.batches ?? 0} 批，目标 ${budgets.targetTokens} tokens`);
-                } else if (result?.reason === 'missing-history') {
-                    // 事件页只加载了最近窗口：结构性失败，不自愈。冷却 30 分钟，避免每轮重试/告警
-                    session.ctxAutoSummaryBlockedUntil = Date.now() + 30 * 60 * 1000;
-                    session.save();
-                    log.warning('[ctx-compact] 历史窗口不足，自动归档冷却 30 分钟（可用 .ai ctx archive 手动重试）');
-                } else {
-                    log.warning(`[ctx-compact] 自动归档未推进（${result?.reason ?? 'unknown'}），保留重试`);
-                }
-            })
-            .catch(e => {
-                session.ctxAutoSummaryInFlight = false;
-                log.warning('[ctx-compact] 自动归档异常（保留重试）: ' + (e instanceof Error ? e.message : String(e)));
-            });
-    }
     /**
      * 单轮对话（aux LLM / 外部插件）：
      * **默认不解析图片**（D3）——prompt 里的 [img:ID] 只作为文本保留；
@@ -281,7 +236,10 @@ export default class Agent {
             // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
             if (acquired) MediaTaskManager.wakePendingNotices(session);
             if (acquired) MemoryScheduler.onRunEnd(session);
-            if (acquired) this.scheduleContextCompaction(session);
+            // v7 待机路径：run 结束后 assistant/tool/notice 已入库，若已空闲且 T≥C 则零 LLM 归档
+            if (acquired && !session.running && !session.starting) {
+                archiveControllerFor(session)?.onIdleAppend();
+            }
         }
         return started;
     }
@@ -345,14 +303,28 @@ export default class Agent {
             await session.flushNotices();
             // L2 记忆结算（P1-3）：三条件满足时把窗口外原文总结进长期记忆（有界、失败退避、不阻塞回复）
             await this.settleBacklog(session);
+            // v7 归档：编译前按 T≥L 硬切（零 LLM）；编译钩子里拿到 L 后触发 beforeRequest
+            const archive = archiveControllerFor(session);
+            archive?.beginRequest();
             const imageTrace = createImageTrace();
-            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, { imagesAsText: handled.imageDegraded, noImages: handled.imageRoleDegraded || handled.payloadTries > 0, excludeImageIds: handled.excludeImageIds, model: Model.getChatModel('chat') || undefined, runtimeText: promptParts.runtime, trace: imageTrace });
+            const messages = await handleMessages(ctx, session, this.isMultimodalChat(), toolInfos || [], systemMessage, modelName, {
+                imagesAsText: handled.imageDegraded,
+                noImages: handled.imageRoleDegraded || handled.payloadTries > 0,
+                excludeImageIds: handled.excludeImageIds,
+                model: Model.getChatModel('chat') || undefined,
+                runtimeText: promptParts.runtime,
+                trace: imageTrace,
+                archiveHooks: archive ? { beforeCompile: info => archive.beforeRequest(info) } : undefined,
+            });
 
             let turn: Awaited<ReturnType<typeof streamService.sendChatRequest>> | null = null;
             try {
                 // throwClassified=true：分类错误（超长/余额不足等）在此上抛，由 handleModelError 自动处理后重发；
                 // 其余调用方不传该选项，维持原有吞错返回空的静默行为
-                turn = await streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, { throwClassified: true });
+                const request = streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, { throwClassified: true });
+                // 主对话请求已发出：并发启动总结（按切后 T 决定范围，不阻塞回复）
+                archive?.afterRequestSent();
+                turn = await request;
             } catch (e) {
                 if (e instanceof StopError) return;
                 if (!(e instanceof ApiError)) throw e;
@@ -676,7 +648,10 @@ export default class Agent {
             // 且不会与本轮自身的续跑抢跑。这是媒体送达"不永久等待"的确定性兜底。
             if (acquired) MediaTaskManager.wakePendingNotices(session);
             if (acquired) MemoryScheduler.onRunEnd(session);
-            if (acquired) this.scheduleContextCompaction(session);
+            // v7 待机路径：run 结束后 assistant/tool/notice 已入库，若已空闲且 T≥C 则零 LLM 归档
+            if (acquired && !session.running && !session.starting) {
+                archiveControllerFor(session)?.onIdleAppend();
+            }
         }
         return started;
     }
@@ -712,10 +687,22 @@ export default class Agent {
             try {
                 const imageTrace = createImageTrace();
                 lastTrace = imageTrace;
-                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, systemMessage, modelName, { imagesAsText: h.imageDegraded, noImages: h.imageRoleDegraded || h.payloadTries > 0, excludeImageIds: h.excludeImageIds, model: Model.getChatModel('chat') || undefined, runtimeText: parts.runtime, trace: imageTrace });
+                const archive = archiveControllerFor(session);
+                archive?.beginRequest();
+                const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, systemMessage, modelName, {
+                    imagesAsText: h.imageDegraded,
+                    noImages: h.imageRoleDegraded || h.payloadTries > 0,
+                    excludeImageIds: h.excludeImageIds,
+                    model: Model.getChatModel('chat') || undefined,
+                    runtimeText: parts.runtime,
+                    trace: imageTrace,
+                    archiveHooks: archive ? { beforeCompile: info => archive.beforeRequest(info) } : undefined,
+                });
                 requestImages = collectImageUrls(messages);
                 const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
                 if (!newId) return;
+                // 流式请求已建立：并发启动总结（不阻塞后续轮询）
+                archive?.afterRequestSent();
                 // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
                 if (session.stopVersion !== version) {
                     session.stream.id = newId;

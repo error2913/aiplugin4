@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 
 import { setHost } from '../src/core/host';
+import { readRaw } from '../src/context/recall';
 import { ContextStore, loadHead } from '../src/context/store';
 import { parseHead } from '../src/context/head';
 import { eventPageKey, headKey } from '../src/context/keys';
@@ -175,5 +176,73 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(store.snapshot().events.length, 0);
         assert.equal(store.getHead().nextSeq, 1);
         assert.equal(loadHead('QQ-Group:store-empty'), null);
+    },
+
+    async testContextStoreCommitArchiveAdvancesWatermark() {
+        resetHost();
+        const sid = 'QQ-Group:store-archive';
+        const store = await ContextStore.open(sid);
+        store.append([userInput('m1'), userInput('m2'), userInput('m3')]);
+        const before = store.getHead();
+        assert.equal(before.archivedThrough, 0);
+        assert.ok(before.unarchivedTokens > 0, '追加后应有未归档 token');
+
+        assert.equal(store.commitArchive(2), 2);
+        const after = store.getHead();
+        assert.equal(after.archivedThrough, 2);
+        assert.ok(after.unarchivedTokens > 0 && after.unarchivedTokens < before.unarchivedTokens, '归档后未归档 token 应扣减');
+        assert.equal(after.unsummarizedTokens, before.unsummarizedTokens, '归档不改变未摘要口径');
+
+        // 幂等 + 只进不退 + 不超过 nextSeq-1
+        assert.equal(store.commitArchive(1), 2);
+        assert.equal(store.commitArchive(2), 2);
+        assert.equal(store.commitArchive(999), 3);
+        assert.equal(store.getHead().unarchivedTokens, 0);
+
+        // 落盘后重开恢复归档边界与计数
+        assert.equal((await store.flush()).ok, true);
+        const reopened = await ContextStore.open(sid);
+        assert.equal(reopened.getHead().archivedThrough, 3);
+        assert.equal(reopened.getHead().unarchivedTokens, 0);
+
+        // 新事件只计入边界之后
+        reopened.append([userInput('m4')]);
+        assert.ok(reopened.getHead().unarchivedTokens > 0);
+        assert.equal(reopened.getHead().archivedThrough, 3);
+    },
+
+    async testContextStoreArchiveDeletionDisabled() {
+        resetHost();
+        const sid = 'QQ-Group:store-archive-deletion';
+        const store = await ContextStore.open(sid, { keepArchivedRaw: false });
+        store.append([userInput('m1'), userInput('m2')]);
+        assert.equal((await store.flush()).ok, true);
+        assert.ok(storage.map.has(eventPageKey(sid, 1)));
+
+        store.commitSummary({ kind: 'summary', id: 'sum:1', at: 1, epoch: 1, fromSeq: 1, toSeq: 2, text: '摘要' }, 2, 0);
+        const head = store.getHead();
+        assert.equal(head.archivedThrough, 2);
+        assert.equal(head.deletedThrough, 2, '已摘要覆盖的归档页应被物理清除');
+        assert.equal(head.pageFloor, 2, 'pageFloor 应前移');
+        assert.equal(storage.map.get(eventPageKey(sid, 1)), '', '页内容应被清空');
+        const raw = readRaw(store, store.snapshot(), 'e:1');
+        assert.ok((raw.note ?? '').includes('deleted'), 'read_raw 对已清区间应给出提示');
+
+        assert.equal((await store.flush()).ok, true, 'head 需落盘后重开才能看到清除水位');
+        const reopened = await ContextStore.open(sid, { keepArchivedRaw: false });
+        assert.equal(reopened.snapshot().events.length, 0);
+        assert.equal(reopened.getHead().deletedThrough, 2);
+    },
+
+    async testContextStoreArchiveDeletionDefaultKeepsRaw() {
+        resetHost();
+        const sid = 'QQ-Group:store-archive-keep';
+        const store = await ContextStore.open(sid);
+        store.append([userInput('m1'), userInput('m2')]);
+        assert.equal((await store.flush()).ok, true);
+        store.commitSummary({ kind: 'summary', id: 'sum:1', at: 1, epoch: 1, fromSeq: 1, toSeq: 2, text: '摘要' }, 2, 0);
+        assert.equal(store.getHead().deletedThrough, 0);
+        assert.equal(store.getHead().pageFloor, 1);
+        assert.ok(storage.map.has(eventPageKey(sid, 1)), '默认「归档保留原文=开」不清页');
     },
 };

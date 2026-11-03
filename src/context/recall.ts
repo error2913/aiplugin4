@@ -397,7 +397,7 @@ function feedEvent(
 function buildEventReadResult(
     address: string,
     acc: ReadAccumulator,
-    options: { exhausted: boolean; fresh: boolean; fromSeq: number; pageFloor: number; locateFailed: boolean },
+    options: { exhausted: boolean; fresh: boolean; fromSeq: number; pageFloor: number; deletedThrough: number; locateFailed: boolean },
 ): ReadRawResult {
     const skippedPages = uniqueSorted(acc.skippedPages);
     const notes: string[] = [];
@@ -405,6 +405,9 @@ function buildEventReadResult(
     if (skippedPages.length > 0) notes.push(pageSummary(skippedPages));
     if (options.locateFailed) notes.push('earlier pages missing; start position could not be located exactly (started from the earliest locatable point)');
     if (options.fromSeq < options.pageFloor) notes.push(`originals before seq<${options.pageFloor} have been cleaned up`);
+    if (options.deletedThrough > 0 && options.fromSeq <= options.deletedThrough) {
+        notes.push(`originals up to e:${options.deletedThrough} were deleted (归档保留原文=关)`);
+    }
     if (options.exhausted && acc.items.length === 0 && notes.length === 0) {
         notes.push(`no readable events in range ${address} (seq may be cleaned up, hidden, or not in this session)`);
     }
@@ -448,12 +451,13 @@ function readRawEventRange(
     if (cursor && cursor.seq > startSeq) startSeq = cursor.seq;
     const head = snapshot.head;
     const pageFloor = head.pageFloor;
+    const deletedThrough = Number(head.deletedThrough) || 0;
     const lastPageNo = head.nextPageNo - 1;
     const acc = createAccumulator();
     const fresh = cursor === null;
 
     if (startSeq > toSeq) {
-        return buildEventReadResult(address, acc, { exhausted: true, fresh, fromSeq, pageFloor, locateFailed: false });
+        return buildEventReadResult(address, acc, { exhausted: true, fresh, fromSeq, pageFloor, deletedThrough, locateFailed: false });
     }
 
     const events = snapshot.events.slice().sort((a, b) => a.seq - b.seq);
@@ -486,7 +490,7 @@ function readRawEventRange(
                     if (event.seq < startSeq) continue;
                     if (event.seq > diskTo) break;
                     if (!feedEvent(acc, event, index, cursor, maxChars, maxItems)) {
-                        return buildEventReadResult(address, acc, { exhausted: false, fresh, fromSeq, pageFloor, locateFailed: acc.locateFailed });
+                        return buildEventReadResult(address, acc, { exhausted: false, fresh, fromSeq, pageFloor, deletedThrough, locateFailed: acc.locateFailed });
                     }
                 }
                 if (page.seqEnd >= diskTo) break;
@@ -495,7 +499,7 @@ function readRawEventRange(
         }
     }
     if (acc.cursor) {
-        return buildEventReadResult(address, acc, { exhausted: false, fresh, fromSeq, pageFloor, locateFailed: acc.locateFailed });
+        return buildEventReadResult(address, acc, { exhausted: false, fresh, fromSeq, pageFloor, deletedThrough, locateFailed: acc.locateFailed });
     }
 
     // 2) 内存窗口内的事件（新；含尚未 flush 的尾部）
@@ -504,10 +508,10 @@ function readRawEventRange(
         if (event.seq < snapStart) continue;
         if (event.seq > toSeq) break;
         if (!feedEvent(acc, event, index, cursor, maxChars, maxItems)) {
-            return buildEventReadResult(address, acc, { exhausted: false, fresh, fromSeq, pageFloor, locateFailed: acc.locateFailed });
+            return buildEventReadResult(address, acc, { exhausted: false, fresh, fromSeq, pageFloor, deletedThrough, locateFailed: acc.locateFailed });
         }
     }
-    return buildEventReadResult(address, acc, { exhausted: true, fresh, fromSeq, pageFloor, locateFailed: acc.locateFailed });
+    return buildEventReadResult(address, acc, { exhausted: true, fresh, fromSeq, pageFloor, deletedThrough, locateFailed: acc.locateFailed });
 }
 
 function isMsgIdMatch(event: ConversationEvent, msgId: string): boolean {
@@ -601,6 +605,7 @@ function readRawMsg(
     const acc = createAccumulator();
     acc.skippedPages.push(...skipped);
     const pageFloor = snapshot.head.pageFloor;
+    const deletedThrough = Number(snapshot.head.deletedThrough) || 0;
     if (!event) {
         return {
             address: msgId,
@@ -620,6 +625,7 @@ function readRawMsg(
         fresh: cursor === null,
         fromSeq: event.seq,
         pageFloor,
+        deletedThrough,
         locateFailed: false,
     });
 }
@@ -822,9 +828,11 @@ function buildGrepResult(
     scannedPages: number,
     skippedPages: number[],
     hidden: number,
+    deletedThrough: number,
 ): GrepRawResult {
     const notes: string[] = [];
     if (hidden > 0) notes.push(`skipped ${hidden} invisible events (epoch/redact/supersede)`);
+    if (deletedThrough > 0) notes.push(`originals up to e:${deletedThrough} were deleted (归档保留原文=关)`);
     const skipped = uniqueSorted(skippedPages);
     if (skipped.length > 0) notes.push(pageSummary(skipped));
     // 扫描顺序是从新到旧；输出统一改为按时间（seq）升序，便于模型按时间线理解
@@ -904,10 +912,10 @@ export function grepRaw(
             if (event.seq <= persistedSeq) continue;
             if (event.seq >= before) continue;
             if (!scanEvent(event)) {
-                return buildGrepResult(hits, { pageNo: head.nextPageNo, beforeSeq: event.seq }, false, scannedPages, skippedPages, hidden);
+                return buildGrepResult(hits, { pageNo: head.nextPageNo, beforeSeq: event.seq }, false, scannedPages, skippedPages, hidden, head.deletedThrough);
             }
             if (stopAll) {
-                return buildGrepResult(hits, null, true, scannedPages, skippedPages, hidden);
+                return buildGrepResult(hits, null, true, scannedPages, skippedPages, hidden, head.deletedThrough);
             }
         }
     }
@@ -920,7 +928,7 @@ export function grepRaw(
 
     while (pageNo >= pageFloor && !stopAll) {
         if (scannedPages >= maxPages) {
-            return buildGrepResult(hits, { pageNo, ...(beforeSeq === undefined ? {} : { beforeSeq }) }, false, scannedPages, skippedPages, hidden);
+            return buildGrepResult(hits, { pageNo, ...(beforeSeq === undefined ? {} : { beforeSeq }) }, false, scannedPages, skippedPages, hidden, head.deletedThrough);
         }
         const outcome = readPageForRecall(store.sessionId, pageNo);
         scannedPages++;
@@ -936,7 +944,7 @@ export function grepRaw(
             const event = pageEvents[i];
             if (beforeSeq !== undefined && event.seq >= beforeSeq) continue;
             if (!scanEvent(event)) {
-                return buildGrepResult(hits, { pageNo, beforeSeq: event.seq }, false, scannedPages, skippedPages, hidden);
+                return buildGrepResult(hits, { pageNo, beforeSeq: event.seq }, false, scannedPages, skippedPages, hidden, head.deletedThrough);
             }
             if (stopAll) break;
         }
@@ -946,5 +954,5 @@ export function grepRaw(
     }
 
     const exhausted = stopAll || pageNo < pageFloor;
-    return buildGrepResult(hits, null, exhausted, scannedPages, skippedPages, hidden);
+    return buildGrepResult(hits, null, exhausted, scannedPages, skippedPages, hidden, head.deletedThrough);
 }

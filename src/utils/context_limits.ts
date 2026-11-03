@@ -39,3 +39,29 @@ export function retainedTargetTokens(permanentBudget: number, percent: number): 
     const pct = normalizeRetainPercent(percent);
     return Math.max(1, Math.floor((budget * pct) / 100));
 }
+
+/** 对话后总结触发系数（契约 k，写死，不做配置） */
+export const ARCHIVE_TRIGGER_RATIO = 0.95;
+
+/** v7 双水位：L=消息上下文预算（已扣固定提示词）、A=保留目标、B=对话触发线、C=待机归档线 */
+export interface ArchiveWatermarks {
+    L: number;
+    A: number;
+    B: number;
+    C: number;
+}
+
+/**
+ * 按契约计算双水位：
+ * - `A = floor(L × n / 100)`（保留目标，单位是未归档原文 token）
+ * - `B = floor(L × 0.95)`（对话后总结触发线）
+ * - `C = L + (B − A)`（待机归档线，默认约 1.65L）
+ */
+export function resolveArchiveWatermarks(messageBudget: number, retainPercent: number): ArchiveWatermarks {
+    const L = Number.isFinite(messageBudget) ? Math.max(0, Math.floor(messageBudget)) : 0;
+    const pct = normalizeRetainPercent(retainPercent);
+    const A = Math.floor((L * pct) / 100);
+    const B = Math.floor(L * ARCHIVE_TRIGGER_RATIO);
+    const C = L + (B - A);
+    return { L, A, B, C };
+}

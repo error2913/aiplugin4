@@ -1,7 +1,7 @@
 // .ai ctx：上下文状态与管理（status/archive/hide/purge/set/name/repair）。
 import { PRIVILEGE_LEVEL_MAP } from "../../config/static_config";
 import { ctxHelpText, parseCtxCommand, runCtxCommand } from "../../context/commands";
-import { compactionRuntimeFor } from "../../context/compact/session_runtime";
+import { archiveControllerFor } from "../../context/compact/session_runtime";
 import type { ConversationEvent } from "../../context/events";
 import { ContextService } from "../../context/service";
 import { estimateEventTokens } from "../../utils/token_estimate";
@@ -39,6 +39,7 @@ export function registerCmdCtx() {
 
         let result;
         try {
+            const controller = archiveControllerFor(session);
             result = await runCtxCommand({
                 sessionId: sid,
                 service,
@@ -46,8 +47,9 @@ export function registerCmdCtx() {
                 session,
                 epId,
                 gid,
-                // 自动摘要与手动 archive 共用同一 runtime（单飞/退避状态一致，避免同一批事件被并发摘要两次）
-                runtime: compactionRuntimeFor(session),
+                // 手动 archive 与自动总结共用同一 controller（单飞/提交/草稿链路一致）
+                archive: controller?.status() ?? null,
+                archiveController: controller,
             });
         } catch (error) {
             seal.replyToSender(ctx, msg, `上下文操作失败：${error instanceof Error ? error.message : String(error)}`);
@@ -58,7 +60,6 @@ export function registerCmdCtx() {
                 const fresh = ContextService.openSync(sid, { estimateEventTokens: storeEstimate });
                 session.contextV2 = fresh;
                 session.context.initV2(fresh);
-                session.ctxAutoSummaryBlockedUntil = 0;
                 session.save();
             } catch {
                 session.contextV2 = null;

@@ -1,10 +1,9 @@
-// 压缩运行时的共享工厂：按会话复用**同一个** CompactionRuntime。
+// 归档控制器的会话级工厂（v7 单一路径；v6 CompactionRuntime 已删除）。
 //
-// 为什么必须共享：自动路径（run 结束钩子）与手动 `.ai ctx archive` 若各 new 一个 runtime，
-// 两个「单飞」互不可见，可同时对同一批未摘要事件执行 compactOnce → 重复摘要/重复计费，
-// 违反「每会话 epoch 最多一条滚动摘要」的语义。
+// 为什么必须共享：自动路径与手动 `.ai ctx archive` 若各 new 一个控制器，
+// 两个「单飞」互不可见，可同时对同一批未摘要事件执行摘要 → 重复摘要/重复计费。
 //
-// P0-4 起，这里是「归档 = 滚动摘要 + 记忆抽取」的接线点：
+// 这里是「归档 = 滚动摘要 + 记忆抽取」的接线点：
 // - summarizeAndExtract：一次 LLM 调用产出 {summary, facts}（archive_prompt）；
 // - applyFacts：通过 L0 端口把 facts 交给记忆层（context 不 import memory）；
 // - load/save/clearArchiveDraft：两阶段草稿，facts 写失败/进程崩溃后重放同一 payload。
@@ -16,23 +15,25 @@ import { logger } from "../../logger";
 import { classifyAuxError, isClassifiedApiError } from "../../model/api_error";
 import { isAuxPaused, noteFatalAuxError } from "../../model/aux_breaker";
 import type { Session } from "../../session/session";
-import { COMPACT_BATCH_TOKENS, COMPACT_MAX_BATCHES_PER_RUN, SUMMARY_MAX_CHARS } from "../../utils/context_limits";
+import { COMPACT_BATCH_TOKENS, SUMMARY_MAX_CHARS } from "../../utils/context_limits";
 import { parseJsonLoose } from "../../utils/json";
-import { estimateEventTokens as estimateEventTokensShared } from "../../utils/token_estimate";
+import {
+    estimateEventTokens as estimateEventTokensShared,
+    estimateTextTokens,
+} from "../../utils/token_estimate";
+import { ArchiveController } from "../archive_controller";
 import type { ConversationEvent } from "../events";
 import type { ContextService } from "../service";
 
 import { buildArchivePrompt } from "./archive_prompt";
 import type { ArchiveDraft } from "./compactor";
-import { CompactionRuntime } from "./runtime";
 
-interface CachedRuntime {
-    /** runtime 绑定的上下文门面：purge 后 service 被替换，需重建（单飞状态不跨 epoch 复用） */
+interface CachedController {
     service: ContextService;
-    runtime: CompactionRuntime;
+    controller: ArchiveController;
 }
 
-const runtimes = new WeakMap<object, CachedRuntime>();
+const controllers = new WeakMap<object, CachedController>();
 const log = logger.withTag('ctx-archive');
 
 /**
@@ -60,20 +61,14 @@ export function clearArchiveDraftForSession(sessionId: string): void {
     try { getHost().storage.set(archiveDraftKey(sessionId), ''); } catch { /* ignore */ }
 }
 
-/** 取会话共享的压缩运行时；未接入事件账本（contextV2 为 null）返回 null。 */
-export function compactionRuntimeFor(session: Session): CompactionRuntime | null {
-    const service = session.contextV2;
-    if (!service) return null;
-    const cached = runtimes.get(session);
-    if (cached && cached.service === service) return cached.runtime;
-
+/** 每会话的归档相关固定信息（scope 文案 / facts 开关 / 草稿存取）。 */
+function archiveContextFor(session: Session) {
     const sessionId = String(session.sessionId || '');
     const isPrivate = !/-Group:/.test(sessionId);
     const platform = sessionId.split(':')[0] || '';
     const rawId = sessionId.replace(/^.+:/, '');
     const scopeLine = `Conversation scope: platform=${platform}, ${isPrivate ? `private chat: ${rawId}` : `group chat: ${rawId}`}`;
     const flags = memoryFlags();
-
     const draftStore = {
         load(): ArchiveDraft | null {
             try {
@@ -92,79 +87,87 @@ export function compactionRuntimeFor(session: Session): CompactionRuntime | null
             try { getHost().storage.set(archiveDraftKey(sessionId), ''); } catch { /* ignore */ }
         },
     };
-
-    const runtime = new CompactionRuntime(
-        {
-            batchTokens: COMPACT_BATCH_TOKENS,
-            summaryMaxChars: SUMMARY_MAX_CHARS,
-            maxBatchesPerRun: COMPACT_MAX_BATCHES_PER_RUN,
-        },
-        {
-            service,
-            // 纯摘要（兼容路径 / 未启用合并时）
-            summarize: async (text: string) => {
-                if (isAuxPaused()) return null;
-                try {
-                    const out = await getAuxLlm().chat('summarize_agent', text, { throwClassified: true });
-                    return typeof out === 'string' && out.trim() ? out : null;
-                } catch (e) {
-                    if (isClassifiedApiError(e) && classifyAuxError(e.kind) === 'fatal') {
-                        noteFatalAuxError(e.kind, e.message);
-                    }
-                    return null;
-                }
-            },
-            // 合并路径：摘要 + facts 同一请求
-            summarizeAndExtract: async ({ previousSummary, segmentText }) => {
-                if (isAuxPaused()) return null;
-                const prompt = buildArchivePrompt({
-                    previousSummary,
-                    segmentText,
-                    scopeLine,
-                    extractEnabled: flags.extract,
-                });
-                let reply: string;
-                try {
-                    reply = await getAuxLlm().chat('summarize_agent', prompt, { throwClassified: true });
-                } catch (e) {
-                    if (isClassifiedApiError(e) && classifyAuxError(e.kind) === 'fatal') {
-                        noteFatalAuxError(e.kind, e.message);
-                    }
-                    return null;
-                }
-                const data = parseJsonLoose(reply);
-                if (!data || typeof data.summary !== 'string' || !data.summary.trim()) return null;
-                if (flags.extract && !Array.isArray(data.facts)) return null;
-                return { summary: data.summary, facts: flags.extract ? data.facts : [] };
-            },
-            // facts 写库（摘要提交后）：失败抛错 → service 保留草稿，下次 compact 重放
-            applyFacts: async (facts, info) => {
-                if (!facts.length) return;
-                const sink = getArchiveFactsSink();
-                if (!sink) {
-                    log.error('[archive] facts sink 未注册，本次 facts 未写库（草稿保留待重放）');
-                    throw new Error('archive_facts_sink_missing');
-                }
-                await sink({
-                    sessionId,
-                    agentName: session.agentName,
-                    facts,
-                    epoch: info.epoch,
-                    fromSeq: info.fromSeq,
-                    toSeq: info.toSeq,
-                });
-            },
-            loadArchiveDraft: () => draftStore.load(),
-            saveArchiveDraft: draft => draftStore.save(draft),
-            clearArchiveDraft: () => draftStore.clear(),
-            estimateEventTokens,
-        },
-    );
-    runtimes.set(session, { service, runtime });
-    return runtime;
+    return { sessionId, scopeLine, flags, draftStore };
 }
 
-/** 测试/热重载用：丢弃某会话的缓存（下一轮按当前 contextV2 重建） */
-export function resetCompactionRuntime(session: object): void {
-    runtimes.delete(session);
+/** 摘要 / facts / 草稿的公共端口（归档控制器唯一入口）。 */
+function buildArchivePorts(session: Session, sessionId: string, scopeLine: string, flags: { extract: boolean; global: boolean }, draftStore: {
+    load(): ArchiveDraft | null;
+    save(draft: ArchiveDraft): void;
+    clear(): void;
+}) {
+    return {
+        // 合并路径：摘要 + facts 同一请求
+        summarizeAndExtract: async ({ previousSummary, segmentText }: { previousSummary: string; segmentText: string }) => {
+            if (isAuxPaused()) return null;
+            const prompt = buildArchivePrompt({
+                previousSummary,
+                segmentText,
+                scopeLine,
+                extractEnabled: flags.extract,
+            });
+            let reply: string;
+            try {
+                reply = await getAuxLlm().chat('summarize_agent', prompt, { throwClassified: true });
+            } catch (e) {
+                if (isClassifiedApiError(e) && classifyAuxError(e.kind) === 'fatal') {
+                    noteFatalAuxError(e.kind, e.message);
+                }
+                return null;
+            }
+            const data = parseJsonLoose(reply);
+            if (!data || typeof data.summary !== 'string' || !data.summary.trim()) return null;
+            if (flags.extract && !Array.isArray(data.facts)) return null;
+            return { summary: data.summary, facts: flags.extract ? data.facts : [] };
+        },
+        // facts 写库（摘要提交后）：失败抛错 → 草稿保留，下次归档入口重放
+        applyFacts: async (facts: unknown[], info: { epoch: number; fromSeq: number; toSeq: number }) => {
+            if (!facts.length) return;
+            const sink = getArchiveFactsSink();
+            if (!sink) {
+                log.error('[archive] facts sink 未注册，本次 facts 未写库（草稿保留待重放）');
+                throw new Error('archive_facts_sink_missing');
+            }
+            await sink({
+                sessionId,
+                agentName: session.agentName,
+                facts,
+                epoch: info.epoch,
+                fromSeq: info.fromSeq,
+                toSeq: info.toSeq,
+            });
+        },
+        loadArchiveDraft: () => draftStore.load(),
+        saveArchiveDraft: (draft: ArchiveDraft) => draftStore.save(draft),
+        clearArchiveDraft: () => draftStore.clear(),
+        estimateEventTokens,
+    };
+}
+
+/** 取会话共享的归档控制器（双水位 + 标记块 + 单飞）；未接入事件账本返回 null。 */
+export function archiveControllerFor(session: Session): ArchiveController | null {
+    const service = session.contextV2;
+    if (!service) return null;
+    const cached = controllers.get(session);
+    if (cached && cached.service === service) return cached.controller;
+
+    const { sessionId, scopeLine, flags, draftStore } = archiveContextFor(session);
+    const controller = new ArchiveController({
+        service,
+        ...buildArchivePorts(session, sessionId, scopeLine, flags, draftStore),
+        estimateTextTokens,
+        batchTokens: COMPACT_BATCH_TOKENS,
+        summaryMaxChars: SUMMARY_MAX_CHARS,
+        log: (message, error) => {
+            if (error === undefined) log.warning(message);
+            else log.warning(`${message}: ${error instanceof Error ? error.message : String(error)}`);
+        },
+    });
+    controllers.set(session, { service, controller });
+    return controller;
+}
+
+/** 测试/热重载用：丢弃某会话的缓存（下一轮按当前 contextV2 重建）。 */
+export function resetArchiveController(session: object): void {
+    controllers.delete(session);
 }

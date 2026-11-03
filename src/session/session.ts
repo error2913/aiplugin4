@@ -180,10 +180,6 @@ export class Session {
      * 上限 8 个端点，超出按最早写入淘汰。
      */
     lastMsgRef: { [epId: string]: number } = {};
-    /** 运行时字段：自动摘要已发起未落地，防同一会话并发重复触发（不持久化，重载后回 false） */
-    ctxAutoSummaryInFlight = false;
-    /** 运行时字段：missing-history 后的自动归档冷却截止（毫秒，P2-3；不持久化） */
-    ctxAutoSummaryBlockedUntil = 0;
     /** 运行时字段：上次补注册规则 timer 的时间（毫秒；节流用，不持久化） */
     lastRuleTimerEnsureAt = 0;
     /** 运行时字段：保存节流状态（不持久化） */
