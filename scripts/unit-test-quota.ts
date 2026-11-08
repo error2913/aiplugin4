@@ -841,6 +841,50 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(parsed.ENABLED, true, 'seal 桩的 getBoolConfig 默认 true');
         assert.equal(parsed.LIMIT_5H, 0, 'seal 桩的 getIntConfig 默认 0');
     },
+
+    /** AC-14：配置越界值全部回退 + WARN，不抛异常 */
+    testConfigOutOfRangeFallback() {
+        const TC = (globalThis as unknown as {
+            __TEST_CONFIG__: {
+                intConfigs: Record<string, number>;
+                templateConfigs: Record<string, string[]>;
+            };
+        }).__TEST_CONFIG__;
+        const origInt = { ...TC.intConfigs };
+        const origTemplate = { ...TC.templateConfigs };
+        try {
+            // 负限制 → 0=不限；负数/超范围百分比 → 100；非有限值同样回退
+            TC.intConfigs['5小时限制'] = -5;
+            TC.intConfigs['一周限制'] = Number.NaN;
+            TC.intConfigs['一个月限制'] = 12.9;
+            TC.intConfigs['会话限制百分比'] = 0;
+            TC.intConfigs['个人限制百分比'] = 1000;
+            TC.intConfigs['摘要用途百分比'] = -1;
+            TC.intConfigs['判定用途百分比'] = 1;
+            TC.intConfigs['识图用途百分比'] = 100;
+            TC.intConfigs['嵌入用途百分比'] = 99.7;
+            let parsed: QuotaConfigView | null = null;
+            assert.doesNotThrow(() => { parsed = QuotaConfig.get(); }, '越界配置不得抛异常');
+            const view = parsed!;
+            assert.equal(view.LIMIT_5H, 0, '负数限制回退 0=不限');
+            assert.equal(view.LIMIT_WEEK, 0, 'NaN 回退 0=不限');
+            assert.equal(view.LIMIT_MONTH, 12, '非整数限制取整');
+            assert.equal(view.SESSION_PERCENT, 100, '0% 回退 100');
+            assert.equal(view.USER_PERCENT, 100, '1000% 回退 100');
+            assert.equal(view.PURPOSE_PERCENT.summarization, 100, '-1% 回退 100');
+            assert.equal(view.PURPOSE_PERCENT['text-embedding'], 99, '99.7 取整为 99');
+            assert.equal(view.PURPOSE_PERCENT.judge, 1, '边界内最小值保留 1');
+
+            // 越界不改变「0=不限」语义：即便预算为 0，判定仍应放行
+            QuotaManager.configure(() => view);
+            assert.equal(QuotaManager.checkChat({ sessionId: 'S1' }), null, '0=不限 ⇒ 放行');
+        } finally {
+            Object.keys(TC.intConfigs).forEach(k => delete TC.intConfigs[k]);
+            Object.assign(TC.intConfigs, origInt);
+            Object.keys(TC.templateConfigs).forEach(k => delete TC.templateConfigs[k]);
+            Object.assign(TC.templateConfigs, origTemplate);
+        }
+    },
 };
 
 // ---- flush 写失败的注入辅助（放在文件末尾，避免打断 tests 字面量可读性） ----
