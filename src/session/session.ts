@@ -619,8 +619,10 @@ export class Session {
         if (id) {
             log.info('end stream:', id);
             if (reply && toolCallStatus) log.warning('unfinished tool call:', reply);
-            await streamService.endStream(id);
+            await streamService.endStream(id, this.quotaIdentity());
         }
+        // 兜底：清理超 TTL 未结算的流（进程被 stop / 后端异常导致 endStream 未被调用）
+        streamService.sweepStaleStreams();
     }
 
     /** 完全停止本会话对话：结束流式输出、升级 stopVersion 中止运行中循环、清理该会话排队请求、清待触发计时器；

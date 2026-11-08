@@ -14,6 +14,7 @@ import { getProbedContextWindow, rememberProbedContextWindow } from "../model/wi
 import { buildPromptParts, promptPartsToSystemMessage } from "../prompt/builder";
 import type { PromptParts } from "../prompt/types";
 import { QuotaManager } from "../quota/manager";
+import { QuotaExceededError } from "../quota/types";
 import Image from "../resource/image";
 import { locateRejectedImageRefs } from "../resource/image_model_source";
 import { Session } from "../session/session";
@@ -323,12 +324,25 @@ export default class Agent {
             try {
                 // throwClassified=true：分类错误（超长/余额不足等）在此上抛，由 handleModelError 自动处理后重发；
                 // 其余调用方不传该选项，维持原有吞错返回空的静默行为
-                const request = streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, { throwClassified: true });
+                const request = streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, {
+                    throwClassified: true,
+                    quota: {
+                        identity: session.quotaIdentity(),
+                        maxTokens: Number((Model.getBodyDefaultsFor('chat') as any)?.max_tokens) || 0,
+                    },
+                });
                 // 主对话请求已发出：并发启动总结（按切后 T 决定范围，不阻塞回复）
                 archive?.afterRequestSent();
                 turn = await request;
             } catch (e) {
                 if (e instanceof StopError) return;
+                // 用量限制：不重试、不切模型，直接结束本轮（提示只发一次，经 notifyOnce 节流）
+                if (e instanceof QuotaExceededError) {
+                    if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                        seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                    }
+                    return;
+                }
                 if (!(e instanceof ApiError)) throw e;
                 const action = await this.handleModelError(ctx, session, e, handled, collectImageUrls(messages), imageTrace);
                 if (action !== 'retry') return;
@@ -701,7 +715,10 @@ export default class Agent {
                     archiveHooks: archive ? { beforeCompile: info => archive.beforeRequest(info) } : undefined,
                 });
                 requestImages = collectImageUrls(messages);
-                const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
+                const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, {
+                    throwClassified: true,
+                    quota: { identity: session.quotaIdentity() },
+                });
                 if (!newId) return;
                 // 流式请求已建立：并发启动总结（不阻塞后续轮询）
                 archive?.afterRequestSent();
@@ -715,6 +732,13 @@ export default class Agent {
                 break;
             } catch (e) {
                 if (e instanceof StopError) return;
+                // 用量限制：流式起流被拒 ⇒ 直接结束本轮（不重试、不切模型）
+                if (e instanceof QuotaExceededError) {
+                    if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                        seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                    }
+                    return;
+                }
                 if (!(e instanceof ApiError)) {
                     log.exception('runStreamInner startStream', e);
                     return;

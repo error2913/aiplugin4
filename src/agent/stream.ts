@@ -7,6 +7,9 @@ import Model, { ModelEntry } from "../model/model";
 import { requestModel } from "../model/provider";
 import { ChatModelUse } from "../model/types";
 import { getProbedContextWindow } from "../model/window_cache";
+import { QuotaManager } from "../quota/manager";
+import type { QuotaIdentity, QuotaReserveHandle } from "../quota/types";
+import { QuotaExceededError } from "../quota/types";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
@@ -104,9 +107,26 @@ function checkRequestBudget(messages: any[], tools: any[], modelName?: string): 
     return rawEstimate;
 }
 
+/** 请求级配额参数（chat 细闸；用途路径不需要，由 requestModel 按 use 推导） */
+export interface QuotaRequestOpts {
+    identity: QuotaIdentity;
+    /** 模型配置里的 max_tokens：预留补足部分（上限 RESERVE_MAX_COMPLETION） */
+    maxTokens?: number;
+}
+
 export class streamService {
-    private static streamMeta = new Map<string, { modelName: string; rawEstimate: number; use: ChatModelUse }>();
-    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean }): Promise<string> {
+    private static streamMeta = new Map<string, {
+        modelName: string;
+        rawEstimate: number;
+        use: ChatModelUse;
+        /** 起流时刻（ms；TTL 清扫用） */
+        startedAt: number;
+        /** 预留句柄（endStream / 失败 / TTL 清扫时释放） */
+        handle?: QuotaReserveHandle;
+        /** 起流时刻的归属身份（endStream 兜底归因；不会被后续 chat 覆盖） */
+        identity?: QuotaIdentity;
+    }>();
+    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean; quota?: QuotaRequestOpts }): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl, STREAM_TOKEN: streamToken } = Config.backend;
         const model = Model.getChatModel('chat');
@@ -114,6 +134,8 @@ export class streamService {
             log.error('未找到可用的对话模型');
             return '';
         }
+        // 预留句柄需在 try 外声明：catch 与 finally 都要能释放
+        let quotaHandle: QuotaReserveHandle | null = null;
         try {
             const body = Model.buildRequestBody('chat', {
                 model: model.name,
@@ -125,6 +147,15 @@ export class streamService {
 
             // 打印请求发送前的上下文
             log.printRequestMessages(body.messages, runId);
+
+            // 用量限制细闸（流式）：model 已判空、fetch 未发出 ⇒ 此时预留最合适（无模型就不该占额度）。
+            // 拒绝时抛 QuotaExceededError，由下方 catch 统一 rethrow（不可吞成空 streamId）。
+            if (opts?.quota) {
+                quotaHandle = QuotaManager.admitChat(
+                    opts.quota.identity,
+                    QuotaManager.estimateChat(model.name, rawEstimate),
+                );
+            }
 
             const response = await withTimeout(() => fetch(`${streamUrl}/start`, {
                 method: 'POST',
@@ -158,13 +189,26 @@ export class streamService {
                 if (!data.id) {
                     throw new Error("服务器响应中没有id字段");
                 }
-                this.streamMeta.set(data.id, { modelName: model.name, rawEstimate, use: 'chat' });
+                this.streamMeta.set(data.id, {
+                    modelName: model.name,
+                    rawEstimate,
+                    use: 'chat',
+                    startedAt: Date.now(),
+                    handle: quotaHandle ?? undefined,
+                    identity: opts?.quota?.identity,
+                });
+                // 句柄已移交 streamMeta（endStream 负责释放），此处清空避免 catch 重复释放
+                quotaHandle = null;
                 return data.id;
             } catch (e) {
                 throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
             }
         } catch (e) {
+            // 预留在失败路径一律释放（否则该会话的 chat 会被永久占住一部分额度）
+            quotaHandle?.release();
             if (e instanceof StopError) throw e;
+            // 配额拒绝对所有调用方都必须可见（吞掉会让 agent 拿到空 streamId 继续空转）
+            if (e instanceof QuotaExceededError) throw e;
             // 主链路（agent 编排）需要按语义自动处理：把分类错误上抛；其余调用方维持吞错返回空
             if (e instanceof ApiError && opts?.throwClassified) throw e;
             log.exception('startStream', e);
@@ -176,7 +220,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse, stream?: boolean }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse, stream?: boolean, quota?: QuotaRequestOpts }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = explicitModel ?? Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -201,7 +245,19 @@ export class streamService {
             log.printRequestMessages(body.messages, runId);
 
             const time = Date.now();
-            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body, model.api), { provider: model.provider, api: model.api, stopEvent, modelName: model.name, rawEstimateTokens: rawEstimate, use: forUse });
+            // 细闸由 requestModel 在重试循环外统一执行一次（预留 + finally 释放）；这里只递 est 与身份
+            const quotaEst = opts?.quota
+                ? QuotaManager.estimateChat(model.name, rawEstimate, opts.quota.maxTokens)
+                : 0;
+            const data = await requestModel(model.url, model.apiKey, buildProviderBody(model.provider, body, model.api), {
+                provider: model.provider,
+                api: model.api,
+                stopEvent,
+                modelName: model.name,
+                rawEstimateTokens: rawEstimate,
+                use: forUse,
+                ...(opts?.quota ? { quotaEst, quotaIdentity: opts.quota.identity } : {}),
+            });
             const response = parseProviderResponse(model.provider, data, model.api);
             if (response.choices && response.choices.length > 0) {
                 const message = response.choices[0].message;
@@ -224,6 +280,8 @@ export class streamService {
             }
         } catch (e) {
             if (e instanceof StopError) throw e;
+            // 配额拒绝必须穿透（不可吞成 {content:''}，否则 agent 拿到空回复继续跑）
+            if (e instanceof QuotaExceededError) throw e;
             // 主链路（agent 编排）需要按语义自动处理：把分类错误上抛；其余调用方（judge/摘要/外部 chatMessages 等）维持吞错返回空
             if (e instanceof ApiError && opts?.throwClassified) throw e;
             log.exception('sendChatRequest', e);
@@ -281,8 +339,14 @@ export class streamService {
         }
     }
 
-    static async endStream(streamId: string): Promise<string> {
+    /**
+     * 结束一条流并结算。
+     * @param quota 调用方身份（**兜底**：优先用 `streamMeta` 里起流时刻记录的身份，
+     *   否则长流期间会话又起了一轮，结算会被记到后来的那轮头上）
+     */
+    static async endStream(streamId: string, quota?: QuotaIdentity): Promise<string> {
         const { STREAM: streamUrl, STREAM_TOKEN: streamToken } = Config.backend;
+        const meta = this.streamMeta.get(streamId);
 
         try {
             const response = await fetch(`${streamUrl}/end?id=${streamId}`, {
@@ -315,13 +379,21 @@ export class streamService {
                 if (data.status === 'success') {
                     // 与非流式同口径：走 extractUsage（含缓存字段）并按用途记账，
                     // 否则 stream:true 的用户在 .ai ctx 里看不到用途用量与缓存命中
-                    const meta = this.streamMeta.get(streamId);
                     const usage = extractUsage(data);
                     if (usage) {
                         if (meta) TokenCalibration.record(meta.modelName, meta.rawEstimate, usage.prompt_tokens);
                         UsageManager.updateUsage(data.model, usage, meta?.use ?? 'chat');
+                        // 流式记账：归因优先 streamMeta（起流时刻的身份），其次调用方传入
+                        try {
+                            QuotaManager.record(
+                                meta?.use ?? 'chat',
+                                (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+                                meta?.identity ?? quota,
+                            );
+                        } catch (error) {
+                            log.warning(`流式配额记账异常（已忽略）：${error instanceof Error ? error.message : String(error)}`);
+                        }
                     }
-                    this.streamMeta.delete(streamId);
                 }
                 return data.status;
             } catch (e) {
@@ -330,6 +402,28 @@ export class streamService {
         } catch (e) {
             log.exception('endStream', e);
             return '';
+        } finally {
+            // 修复既有泄漏：失败路径原本不 delete（Map 无限增长）；预留必须无条件释放
+            meta?.handle?.release();
+            this.streamMeta.delete(streamId);
         }
+    }
+
+    /**
+     * 兜底清扫：超 TTL 仍未结算的流（进程被 stop / 后端异常导致 endStream 没被调用）。
+     * 随 stop 触发调用一次，不引入额外定时器。
+     */
+    static sweepStaleStreams(now = Date.now(), ttlMs = 30 * 60 * 1000): void {
+        for (const [id, meta] of this.streamMeta) {
+            if (now - meta.startedAt <= ttlMs) continue;
+            meta.handle?.release();
+            this.streamMeta.delete(id);
+            log.warning(`流式句柄超时清理: ${id}`);
+        }
+    }
+
+    /** 仅供单测：当前挂起的流数（校验释放/删除） */
+    static pendingStreamCountForTest(): number {
+        return this.streamMeta.size;
     }
 }
