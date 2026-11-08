@@ -33,7 +33,7 @@ import { getSession, SessionService } from "../src/session/session_service";
 import { registerSubCommands, registerAllCmds } from "../src/cmd/bootstrap";
 import { setHost } from "../src/core/host";
 import { SubCmd } from "../src/cmd/root_cmd";
-import { defaultCmdPriv, U } from "../src/cmd/privilege";
+import { defaultCmdPriv, M, U } from "../src/cmd/privilege";
 import { registerCmdStatus } from "../src/cmd/sub_cmd/status";
 import { registerCmdModel } from "../src/cmd/sub_cmd/model";
 import { registerCmdOff } from "../src/cmd/sub_cmd/off";
@@ -73,6 +73,8 @@ import { describeBalanceError, fetchBalance, parseBalancePayload, resolveBalance
 import { ARCHIVE_CHUNK_TOKENS, buildRoundSegments, Context, dropOldestRound, estimateContextMessagesTokens, getKeepStart, isRealUserMessage, splitMessagesByToken, truncateMiddle } from "../src/context/context";
 import { evictExpiredShards, readShard, writeShardIfAbsent } from "../src/context/archive_store";
 import { registerCmdToken } from "../src/cmd/sub_cmd/token";
+import { QuotaManager } from "../src/quota/manager";
+import { resetStoreCacheForTest } from "../src/quota/store";
 import { UsageManager, chartImageCQ, get_chart_url } from "../src/usage";
 import { resolveEffectiveMaxTokens } from "../src/model/api_error";
 import { getProbedContextWindow, rememberProbedContextWindow } from "../src/model/window_cache";
@@ -2363,6 +2365,129 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             (globalThis as any).seal.replyToSender = origReply;
             UsageManager.storeCache = null;
+        }
+    },
+
+    /**
+     * P2：`.ai tk quota / me / rank / quota clear` 四命令 + `use` 增强。
+     * 用内存宿主 + 固定时钟造四态（未启用 / 已启用 / 已启用超限 / 总量全 0），并断言权限表嵌套。
+     */
+    async testTokenQuotaView(): Promise<void> {
+        if (!SubCmd.map['token']) registerCmdToken();
+        const origReply = (globalThis as any).seal.replyToSender;
+        let replied = '';
+        (globalThis as any).seal.replyToSender = (_c: any, _m: any, t: string) => { replied = String(t); };
+        const map = new Map<string, string>();
+        // 2026-11-05 是周四、14:00 命中默认峰时「1-5 14:00-18:00-30」
+        const now = new Date(2026, 10, 5, 14, 0, 0).getTime();
+        const quotaView = (over: Record<string, unknown> = {}) => ({
+            ENABLED: false,
+            LIMIT_5H: 1_000_000,
+            LIMIT_WEEK: 5_000_000,
+            LIMIT_MONTH: 20_000_000,
+            SESSION_PERCENT: 100,
+            USER_PERCENT: 100,
+            PEAK_RULE: { segments: [{ day: 4, start: 14 * 60, end: 18 * 60, pct: 30, frame: 1, raw: '1-5 14:00-18:00-30' }], warnings: [] },
+            PURPOSE_PERCENT: { summarization: 100, judge: 100, 'image-understanding': 100, 'text-embedding': 100 },
+            NOTIFY_ON_LIMIT: true,
+            ...over,
+        });
+        const run = (args: (string | undefined)[]) => SubCmd.map['token'].solve({
+            ctx: makeCtx(), msg: {} as any,
+            cmdArgs: { kwargs: [], getArgN: (n: number) => args[n - 2] ?? '' } as any,
+            epId: 'QQ:10000', uid: 'QQ:10000', gid: 'QQ-Group:5', sid: 'QQ-Group:5',
+            session: {} as any, page: 1, ret: {} as any
+        } as any);
+        setHost({
+            storage: { get: (key: string) => map.get(key) ?? null, set: (key: string, value: string) => { map.set(key, value); } },
+            clock: { now: () => now },
+            fetch: (url, init) => fetch(url, init),
+            ext,
+        });
+        try {
+            // 权限表：quota.clear / rank 必须是 M（嵌套 args 缺了会让 clear 按 U 放行）
+            const priv = SubCmd.map['token'].priv as any;
+            assert.deepEqual(priv.args.quota.args.clear.priv, M, 'quota clear 必须收紧到骰主');
+            assert.deepEqual(priv.args.rank.priv, M, 'rank 必须收紧到骰主');
+            assert.deepEqual(priv.args.quota.priv, U, 'quota 查看本身是 U');
+            assert.deepEqual(priv.args.me.priv, U, 'me 是 U');
+
+            // 态 1：未启用（仅统计）；峰时未参与计算
+            resetStoreCacheForTest();
+            QuotaManager.configure(() => quotaView() as any);
+            QuotaManager.reset();
+            QuotaManager.record('chat', 480_000, { sessionId: 'QQ-Group:5', userId: 'QQ:10000' });
+            await run(['quota']);
+            assert.ok(replied.includes('未启用（仅统计，不拦截）'), `未启用态首行（实际：${replied}）`);
+            assert.ok(replied.includes('5小时') && replied.includes('本周') && replied.includes('本月'), '三窗口齐备');
+            assert.ok(replied.includes('命中「1-5 14:00-18:00-30」'), '应显示命中的峰时原文');
+            assert.ok(replied.includes('0.3'), '系数应为 0.3');
+            assert.ok(replied.includes('会话') && replied.includes('本人'), '会话/本人两档都要显示');
+
+            // 态 2：已启用且 5 小时超限（E = 1,000,000 × 30% = 300,000 < 480,000）
+            QuotaManager.configure(() => quotaView({ ENABLED: true }) as any);
+            await run(['quota']);
+            assert.ok(replied.includes('已启用，当前超限：5小时窗口'), `超限态首行（实际首行：${replied.split('\n')[0]}）`);
+            assert.ok(replied.includes('已超限'), '剩余列应写「已超限」');
+            assert.ok(replied.includes('有效预算 = 总限制 × 30%'), '启用后系数参与计算');
+
+            // 态 3：已启用但三个总限制全 0 = 不限
+            QuotaManager.configure(() => quotaView({ ENABLED: true, LIMIT_5H: 0, LIMIT_WEEK: 0, LIMIT_MONTH: 0 }) as any);
+            await run(['quota']);
+            assert.ok(replied.includes('三个总限制均为 0=不限，不会拦截'), `全 0 态首行（实际：${replied.split('\n')[0]}）`);
+            assert.ok(replied.includes('不限'), '不限应渲染「不限」而不是 0%');
+
+            // 态 4：未启用（不加约束）——回到默认视图
+            QuotaManager.configure(() => quotaView() as any);
+
+            // me：本人三窗口
+            await run(['me']);
+            assert.ok(replied.includes('【本人用量】'), `me 首行（实际：${replied.split('\n')[0]}）`);
+            assert.ok(replied.includes('480,000'), '本人 5 小时已用应显示千分位');
+            assert.ok(replied.includes('群聊：仅统计你触发的轮次'), '群聊应给出归属说明');
+
+            // rank：排除子代理、默认 Top10、带总量说明
+            QuotaManager.record('chat', 120_000, { sessionId: 'sub:QQ-Group:5:1', userId: '' });
+            QuotaManager.record('chat', 60_000, { sessionId: 'QQ-Group:9', userId: '' });
+            await run(['rank']);
+            assert.ok(replied.includes('QQ-Group:5'), `rank 应含主会话（实际：${replied}）`);
+            assert.ok(!replied.includes('sub:QQ-Group:5:1'), 'rank 必须排除子代理会话');
+            assert.ok(replied.includes('共 2 个会话'), `rank 尾部统计（实际：${replied.split('\n').pop()}）`);
+            assert.ok(replied.includes('仅显示前'), 'rank 应说明截断');
+            await run(['rank', 'month', '1']);
+            assert.ok(replied.includes('本月预算'), '显式窗口参数应生效');
+            assert.ok(replied.includes('仅显示前 1'), 'n=1 应只显示一条');
+
+            // 非法第三段：给用法而不是当模型名
+            await run(['quota', 'xxx']);
+            assert.ok(replied.includes('用法：.ai tk quota'), `非法参数应给用法（实际：${replied}）`);
+
+            // clear：只清配额，不动 usageMap
+            UsageManager.storeCache = { models: {}, purposes: {} };
+            await run(['quota', 'clear']);
+            assert.ok(replied.includes('已清零用量限制计数'), 'clear 应回执');
+            assert.equal(QuotaManager.status().windows.h.used, 0, 'clear 后用量归零');
+            assert.equal(QuotaManager.rank('h', 10).length, 0, 'clear 后排行清空');
+
+            // 空排行
+            await run(['rank']);
+            assert.ok(replied.includes('暂无会话用量记录'), '空排行应给提示');
+
+            // use 增强：追加当前窗口用途行
+            UsageManager.storeCache = {
+                models: {},
+                purposes: { summarization: { '2026-11-1': { prompt_tokens: 300, completion_tokens: 10 } } },
+            };
+            QuotaManager.record('summarization', 50_000, {});
+            await run(['use']);
+            assert.ok(replied.includes('当前窗口（5小时）'), `use 应追加配额用途行（实际：${replied}）`);
+            assert.ok(replied.includes('摘要'), 'use 应显示用途中文名');
+        } finally {
+            (globalThis as any).seal.replyToSender = origReply;
+            UsageManager.storeCache = null;
+            resetStoreCacheForTest();
+            QuotaManager.configure(() => Config.quota);
+            installTestHost();
         }
     },
 
