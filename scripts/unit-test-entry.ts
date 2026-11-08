@@ -194,19 +194,35 @@ function makeCtx(): any {
     return { endPoint: { userId: 'QQ:10000' }, player: { userId: 'QQ:10000', name: '测试员' } };
 }
 
-/** Image 转 base64 测试：静默 error 日志并指向测试后端，结束后还原 */
+/** Image 转 base64 测试：静默 error 日志（直连不再依赖任何后端配置），结束后还原 */
 function setupImageTestConfig() {
     TC.optionConfigs['日志级别'] = '从不';
-    TC.stringConfigs['后端配置'] = JSON.stringify({
-        version: 1,
-        backends: { 'image-url-to-base64': { url: 'http://test-backend' } },
-    });
+    // 防漂移：确保「识图」用例不会因为 option 变成「总是」而真去连 example.com（Node 无外网 → 30s 卡死）
+    TC.optionConfigs['识别图片时将url转换为base64'] = '永不';
+    delete TC.stringConfigs['后端配置'];
     resetConfigCache();
 }
 function restoreImageTestConfig() {
     delete TC.optionConfigs['日志级别'];
+    delete TC.optionConfigs['识别图片时将url转换为base64'];
     delete TC.stringConfigs['后端配置'];
     resetConfigCache();
+}
+
+/** 字节数组 → latin1 字符串（模拟 goja 里 text() 的返回值），配合纯海豹直连取字节 */
+function bytesToBody(bytes: number[]): string {
+    return bytes.map(b => String.fromCharCode(b)).join('');
+}
+/** 1x1 PNG 的 magic 头 */
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+/** 图片直连 mock 响应（带 headers.get，ImageFetch 会读 content-type/content-length） */
+function imageResponse(bytes: number[], contentType = 'image/png') {
+    return {
+        ok: true,
+        status: 200,
+        headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? contentType : null) },
+        text: async () => bytesToBody(bytes),
+    };
 }
 
 
@@ -5234,22 +5250,22 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
         }
     },
-    /** Image.urlToBase64 成功：写入 base64/format 并复位失败标记 */
+    /** Image.urlToBase64 成功（纯海豹直连）：写入 base64/format 并复位失败标记 */
     async testImageUrlToBase64Success(): Promise<void> {
         setupImageTestConfig();
         const origFetch = (globalThis as any).fetch;
         let fetchCount = 0;
         (globalThis as any).fetch = async () => {
             fetchCount++;
-            return { ok: true, status: 200, text: async () => JSON.stringify({ base64: 'QUJD', format: 'png' }) };
+            return imageResponse(PNG_MAGIC);
         };
         try {
             const img = new Image();
             img.imageId = 'img_success';
             img.url = 'https://example.com/a.png';
             await img.urlToBase64();
-            assert.equal(fetchCount, 1, '成功应请求一次后端');
-            assert.equal(img.base64, 'QUJD');
+            assert.equal(fetchCount, 1, '成功应请求一次图片地址');
+            assert.equal(img.base64, Buffer.from(PNG_MAGIC).toString('base64'), '直连应拿到原始字节（无损）');
             assert.equal(img.format, 'png');
             assert.equal(img.base64Failed, false, '成功后失败标记应为 false');
             assert.equal(img.base64FailedAt, 0, '成功后失败时间戳应清空');
@@ -5261,8 +5277,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** Image.urlToBase64 失败（可重试类）：落失败标记，1 小时冷却期内不再重复请求后端。
-     *  注：上游 4xx（如 "400 Client Error: Bad Request for url: ..."）属永久失效，见 testImageUrlToBase64ExpiredIsPermanent */
+    /** Image.urlToBase64 失败（可重试类，如 500）：落失败标记，1 小时冷却期内不再重复请求。
+     *  注：4xx 属永久失效，见 testImageUrlToBase64ExpiredIsPermanent */
     async testImageUrlToBase64FailureMarksAndSkips(): Promise<void> {
         setupImageTestConfig();
         const origFetch = (globalThis as any).fetch;
@@ -5272,7 +5288,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
             return {
                 ok: false,
                 status: 500,
-                text: async () => JSON.stringify({ error: 'backend unreachable' })
+                headers: { get: () => null },
+                text: async () => 'backend unreachable'
             };
         };
         try {
@@ -5280,15 +5297,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
             img.imageId = 'img_fail';
             img.url = 'https://expired.qq.com/x.png';
             await img.urlToBase64();
-            assert.equal(fetchCount, 1, '首次失败应请求一次后端');
+            assert.equal(fetchCount, 1, '首次失败应请求一次图片地址');
             assert.equal(img.base64Failed, true, '失败后应落标记');
             assert.ok(img.base64FailedAt > 0, '失败后应记录时间戳');
             assert.equal(img.base64FailedCount, 1, '失败后连续失败次数应为 1');
             assert.equal(img.base64, '');
             assert.equal(img.type, 'url');
-            // 冷却期内再次请求：不再发后端请求，也不再报错
+            // 冷却期内再次请求：不再发请求，也不再报错
             await img.urlToBase64();
-            assert.equal(fetchCount, 1, '冷却期内不应再次请求后端');
+            assert.equal(fetchCount, 1, '冷却期内不应再次请求');
             assert.equal(img.base64Failed, true);
             assert.equal(img.isBase64RetryBlocked(), true, '冷却期内应判定为 blocked');
         } finally {
@@ -5308,9 +5325,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (globalThis as any).fetch = async () => {
             fetchCount++;
             if (fetchCount === 1) {
-                return { ok: false, status: 500, text: async () => '{"error":"expired"}' };
+                return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'expired' };
             }
-            return { ok: true, status: 200, text: async () => JSON.stringify({ base64: 'QUJD', format: 'png' }) };
+            return imageResponse(PNG_MAGIC);
         };
         try {
             const img = new Image();
@@ -5328,7 +5345,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             fakeNow += 2 * 60 * 1000;
             await img.urlToBase64();
             assert.equal(fetchCount, 2, '冷却期结束后应重试一次');
-            assert.equal(img.base64, 'QUJD');
+            assert.equal(img.base64, Buffer.from(PNG_MAGIC).toString('base64'));
             assert.equal(img.base64Failed, false);
             assert.equal(img.base64FailedAt, 0);
             assert.equal(img.base64FailedCount, 0, '重试成功后失败次数应清零');
@@ -5340,7 +5357,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** Image.urlToBase64 并发去重：同一实例并发调用只发一次后端请求，请求结束释放槽位 */
+    /** Image.urlToBase64 并发去重：同一实例并发调用只发一次请求，请求结束释放槽位 */
     async testImageUrlToBase64ConcurrentDedupe(): Promise<void> {
         setupImageTestConfig();
         const origFetch = (globalThis as any).fetch;
@@ -5350,7 +5367,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (globalThis as any).fetch = async () => {
             fetchCount++;
             await gate;
-            return { ok: false, status: 500, text: async () => '{"error":"expired"}' };
+            return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'expired' };
         };
         try {
             const img = new Image();
@@ -5358,10 +5375,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
             img.url = 'https://example.com/b.png';
             const p1 = img.urlToBase64();
             const p2 = img.urlToBase64();
-            assert.equal(fetchCount, 1, '并发调用应共享同一次后端请求');
+            assert.equal(fetchCount, 1, '并发调用应共享同一次请求');
             release();
             await Promise.all([p1, p2]);
-            assert.equal(fetchCount, 1, '去重后后端只请求一次');
+            assert.equal(fetchCount, 1, '去重后只请求一次');
             assert.equal(img.base64Failed, true);
             assert.equal(img.base64FailedCount, 1, '失败后连续失败次数应为 1');
             // 请求结束后去重槽位应释放：手动清除失败标记（模拟冷却期结束）后应重新请求
@@ -5376,14 +5393,14 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 多模态构建：转换失败（可重试类，如后端 5xx）后保留原 URL（方案 A），冷却期内不再重复请求 */
+    /** 多模态构建：转换失败（可重试类，如 5xx）后保留原 URL（方案 A），冷却期内不再重复请求 */
     async testBuildMultimodalContentKeepsFailedUrl(): Promise<void> {
         setupImageTestConfig();
         const origFetch = (globalThis as any).fetch;
         let fetchCount = 0;
         (globalThis as any).fetch = async () => {
             fetchCount++;
-            return { ok: false, status: 500, text: async () => '{"error":"backend unavailable"}' };
+            return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'unavailable' };
         };
         const img = new Image();
         img.imageId = 'img_mm1';
@@ -5437,7 +5454,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         let fetchCount = 0;
         (globalThis as any).fetch = async () => {
             fetchCount++;
-            return { ok: false, status: 500, text: async () => '{"error":"expired"}' };
+            return { ok: false, status: 500, headers: { get: () => null }, text: async () => 'expired' };
         };
         try {
             const img = new Image();
@@ -5492,7 +5509,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(Image.isTemporaryUrl('not a url'), false, '非法 URL 不应崩溃');
     },
 
-    /** 过期直链（后端回包写明上游 400）→ 直接永久失效：不再重试、不再交给模型、识图跳过 */
+    /** 过期直链（直连返回 4xx）→ 直接永久失效：不再重试、不再交给模型、识图跳过 */
     async testImageUrlToBase64ExpiredIsPermanent(): Promise<void> {
         setupImageTestConfig();
         const origFetch = (globalThis as any).fetch;
@@ -5503,8 +5520,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const qqUrl = 'https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=abc&spec=0&rkey=dead';
         (globalThis as any).fetch = async () => {
             fetchCount++;
-            // 与线上日志同形：后端把上游 QQ 的 400 写进错误正文，自身返回 500
-            return { ok: false, status: 500, text: async () => `{"error":"An error occurred while processing the image: 400 Client Error: Bad Request for url: ${qqUrl}"}` };
+            // 直连自己看到的就是真 4xx（不再依赖后端把上游状态写进正文）
+            return { ok: false, status: 400, headers: { get: () => null }, text: async () => 'Bad Request' };
         };
         try {
             const img = new Image();
@@ -5512,24 +5529,84 @@ export const tests: Record<string, () => void | Promise<void>> = {
             img.url = qqUrl;
             await img.urlToBase64();
             assert.equal(fetchCount, 1);
-            assert.equal(img.urlBroken, true, '上游 4xx 应判定为 URL 已不可用');
+            assert.equal(img.urlBroken, true, '4xx 应判定为 URL 已不可用');
             assert.equal(img.base64FailedCount, 3, '永久性失败应直接按达上限处理');
             assert.equal(img.isBase64RetryBlocked(), true, '永久性失败应立即阻断重试');
             assert.equal(img.isUrlUnusable(), true, '死链不应再作为 image_url 交给模型');
             // 冷却期早已过去也不再重试（无意义的 3 次重试被省掉）
             fakeNow += 100 * 24 * 60 * 60 * 1000;
             await img.urlToBase64();
-            assert.equal(fetchCount, 1, '永久失效后不应再请求后端');
+            assert.equal(fetchCount, 1, '永久失效后不应再请求');
             // 429/5xx 属可重试类：不应被误判为永久失效
             const rate = new Image();
             rate.imageId = 'img_rate';
             rate.url = 'https://example.com/rate.png';
-            (globalThis as any).fetch = async () => ({ ok: false, status: 500, text: async () => '{"error":"429 Client Error: Too Many Requests"}' });
+            (globalThis as any).fetch = async () => ({ ok: false, status: 429, headers: { get: () => null }, text: async () => 'Too Many Requests' });
             await rate.urlToBase64();
             assert.equal(rate.urlBroken, false, '429 限速不应判定为永久失效');
             assert.equal(rate.base64FailedCount, 1, '限速失败应按可重试计数');
         } finally {
             Date.now = origNow;
+            (globalThis as any).fetch = origFetch;
+            restoreImageTestConfig();
+        }
+    },
+
+    /** 失败路径不烧配额：404→3 次判永久；200-非图片→只计数 1（非永久）；缺 btoa→计数 0（仅冷却） */
+    async testImageFailurePathsDoNotBurnQuota(): Promise<void> {
+        setupImageTestConfig();
+        const origFetch = (globalThis as any).fetch;
+        const origBtoa = (globalThis as any).btoa;
+        const logs: string[] = [];
+        // 必须拦截 emit（withTag() 返回的 logger 直接调用 emit，绕过静态 warning）
+        const origEmit = (Logger as any).emit;
+        (Logger as any).emit = (level: string, ...data: any[]) => { logs.push(data.map(String).join(' ')); };
+        try {
+            // ① 直连 404：判永久，直接按达上限
+            (globalThis as any).fetch = async () => ({ ok: false, status: 404, headers: { get: () => null }, text: async () => 'Not Found' });
+            const dead = new Image();
+            dead.imageId = 'img_q1';
+            dead.url = 'https://example.com/dead.png';
+            await dead.urlToBase64();
+            assert.equal(dead.base64FailedCount, 3, '404 应直接按达上限处理');
+            assert.equal(dead.urlBroken, true);
+
+            // ② 200 但不是图片（WAF/登录页）：可重试，只计数 1，不判死链
+            (globalThis as any).fetch = async () => ({
+                ok: true, status: 200,
+                headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'text/html' : null) },
+                text: async () => '<html>blocked</html>',
+            });
+            const waf = new Image();
+            waf.imageId = 'img_q2';
+            waf.url = 'https://example.com/waf.png';
+            await waf.urlToBase64();
+            assert.equal(waf.base64FailedCount, 1, '200-非图片只应计数 1（非永久）');
+            assert.equal(waf.urlBroken, false, '200-非图片不得判死链');
+
+            // ③ 运行时缺 btoa：计数 0、仅 1h 冷却，且日志只出现一次
+            delete (globalThis as any).btoa;
+            logs.length = 0;
+            for (const id of ['img_q3', 'img_q4']) {
+                (globalThis as any).fetch = async () => imageResponse(PNG_MAGIC);
+                const nb = new Image();
+                nb.imageId = id;
+                nb.url = `https://example.com/${id}.png`;
+                await nb.urlToBase64();
+                assert.equal(nb.base64FailedCount, 0, '缺 btoa 不得消耗 3 次配额');
+                assert.equal(nb.urlBroken, false);
+                assert.equal(nb.base64Failed, true, '仍应进 1h 冷却（避免每轮重试）');
+            }
+            assert.equal(logs.filter(l => l.includes('btoa')).length, 1, '缺 btoa 的提示只应出现一次');
+
+            // ④ 错误文案不得泄露后端细节或 base64 原文
+            for (const line of logs) {
+                assert.equal(line.includes('backends.'), false, `日志不得含 backends.：${line}`);
+                assert.equal(line.includes('base64;'), false, `日志不得含 base64 原文标记：${line}`);
+            }
+        } finally {
+            (Logger as any).emit = origEmit;
+            (globalThis as any).btoa = origBtoa;
             (globalThis as any).fetch = origFetch;
             restoreImageTestConfig();
         }
@@ -5542,7 +5619,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         let fetchCount = 0;
         (globalThis as any).fetch = async () => {
             fetchCount++;
-            return { ok: false, status: 500, text: async () => '{"error":"An error occurred while processing the image: 400 Client Error: Bad Request for url: https://multimedia.nt.qq.com.cn/download?rkey=x"}' };
+            // 直连真 4xx：URL 已死
+            return { ok: false, status: 400, headers: { get: () => null }, text: async () => 'Bad Request' };
         };
         const expired = new Image();
         expired.imageId = 'img_deg1';
@@ -11194,8 +11272,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 图片 URL→base64 回退后端（未配图床时）：应带 token */
-    async testImageBackendTokenHeader(): Promise<void> {
+    /** 已移除的 i2b64 后端：配置里残留也不注册、不读取、不发请求（issue #162） */
+    async testImageDirectFetchIgnoresRemovedBackend(): Promise<void> {
         const origFetch = (globalThis as any).fetch;
         const origBackend = TC.stringConfigs['后端配置'];
         const origLog = TC.optionConfigs['日志级别'];
@@ -11209,19 +11287,16 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetConfigCache();
             (globalThis as any).fetch = async (url: string, init: any) => {
                 seen.push({ url: String(url), auth: init?.headers?.Authorization || '' });
-                return {
-                    ok: true, status: 200,
-                    headers: { get: () => 'application/json' },
-                    text: async () => JSON.stringify({ base64: 'AAAA', format: 'png' }),
-                };
+                return imageResponse(PNG_MAGIC);
             };
             const img = new Image();
             img.url = 'https://qq.example/a.png';
             await img.urlToBase64();
-            assert.equal(seen.length, 1, '应请求一次图片转 base64 后端');
-            assert.ok(seen[0].url.includes('/image-to-base64'));
-            assert.equal(seen[0].auth, 'Bearer i2b64-token', '图片转 base64 应带 token');
-            assert.equal(img.base64, 'AAAA');
+            assert.equal(seen.length, 1, '应只请求一次（直连图片地址）');
+            assert.equal(seen[0].url, 'https://qq.example/a.png', '必须直连原图地址，不得请求已移除的后端');
+            assert.equal(seen.some(c => c.url.includes('46678')), false, '不得回退默认 i2b64 端口');
+            assert.equal(seen[0].auth, '', '直连不得携带任何后端 token');
+            assert.equal(img.base64, Buffer.from(PNG_MAGIC).toString('base64'), '直连字节应无损');
         } finally {
             (globalThis as any).fetch = origFetch;
             if (origBackend === undefined) delete TC.stringConfigs['后端配置']; else TC.stringConfigs['后端配置'] = origBackend;

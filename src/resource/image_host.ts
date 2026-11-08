@@ -11,6 +11,7 @@
 import Config from "../config/config";
 import { logger } from "../logger";
 import { backendAuthHeaders } from "../utils/backend";
+import { withDeadline } from "../utils/timeout";
 import { isLoopbackUrl } from "../utils/url";
 
 import { isPrivateOrLoopbackUrl } from "./image_ref";
@@ -22,6 +23,8 @@ const log = logger.withTag('image-host');
 /** 图床请求超时：上传要下载远端图 + 落盘，比普通 JSON 接口慢，给 20s */
 const UPLOAD_TIMEOUT_MS = 20_000;
 const READ_TIMEOUT_MS = 10_000;
+/** 熔断窗口：数据面请求失败（网络/超时/后端 5xx）后，60s 内不再尝试，避免每张图都等一次超时 */
+const UNHEALTHY_WINDOW_MS = 60_000;
 
 /** 来源信息：图片从哪条消息/哪个群/谁那里来的（用于图床画廊展示来源） */
 export interface ImageSource {
@@ -56,32 +59,6 @@ function normalizeBase(raw: string): string {
     return base;
 }
 
-/** 带超时的 Promise：settle 后清掉定时器（goja 里 setTimeout 也是数字 id） */
-function withDeadline<T>(fn: () => Promise<T>, timeoutMs: number): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        let settled = false;
-        const timer = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            reject(new Error(`请求超时 (${timeoutMs}ms)`));
-        }, timeoutMs);
-        fn().then(
-            value => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer as any);
-                resolve(value);
-            },
-            error => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer as any);
-                reject(error);
-            }
-        );
-    });
-}
-
 function pickItem(data: any): HostItem | null {
     if (!data || typeof data !== 'object') return null;
     const id = typeof data.id === 'string' ? data.id : '';
@@ -99,6 +76,8 @@ class _ImageHost {
     static lastError = '';
     /** 最近一次请求的 HTTP 状态码（0 = 网络错误/超时）；用于区分 404 与“够不到” */
     static lastStatus = 0;
+    /** 熔断到期时间戳（0 = 健康）。只 gate 数据面（上传/取字节）；控制面（probe/GC）照常发请求，但其失败也会续期熔断 */
+    private static unhealthyUntil = 0;
     /** 后端自报能力（/api/health 的 capabilities；旧后端为空 → 走旧图源路径） */
     static capabilities: string[] = [];
     /** 是否已成功探测过一次能力（旧后端无 capabilities / 启动时后端未就绪时不反复 probe） */
@@ -127,6 +106,33 @@ class _ImageHost {
     static resetUploadSlotsForTest(): void {
         this.activeUploads = 0;
         this.uploadWaiters = [];
+    }
+
+    /** 是否处于熔断期（数据面：上传/取字节应直接跳过，避免白等超时） */
+    static isDegraded(): boolean {
+        return this.unhealthyUntil > Date.now();
+    }
+
+    /**
+     * 记录一次后端请求结果：网络错误/超时(status=0) 或后端 5xx → 进入/续期熔断；host 可达（含 401/404/429）→ 清零。
+     *
+     * 注意：
+     *  - 控制面（probe/release/exists/fetchChanges）也走这里 → 其失败同样会续期熔断（预期行为：后端确实挂了）；
+     *  - **没有定时 probe**：恢复靠「60s 自然到期后的首个数据面请求」或「某次请求成功清零」，不要指望后台定时探查。
+     */
+    private static noteHealth(status: number): void {
+        const code = Number(status) || 0;
+        if (code === 0 || code >= 500) {
+            this.unhealthyUntil = Date.now() + UNHEALTHY_WINDOW_MS;
+            log.warning(`图床暂时不可用（${code === 0 ? '网络错误/超时' : `HTTP ${code}`}），${Math.round(UNHEALTHY_WINDOW_MS / 1000)}s 内跳过图床直取，改走插件直连`);
+            return;
+        }
+        this.unhealthyUntil = 0;
+    }
+
+    /** 测试用：重置熔断状态 */
+    static resetHealthForTest(): void {
+        this.unhealthyUntil = 0;
     }
 
     /** 配置的图床地址（插件请求图床接口用；去掉尾部 /）；空 = 未启用 */
@@ -242,6 +248,12 @@ class _ImageHost {
     ): Promise<{ base64: string; format: string; mime: string; w: number; h: number } | null> {
         if (!this.enabled || !hostedId || !this.supportsModelVariant) return null;
         const path = `/m/${hostedId}/b64${maxSide > 0 ? `?max=${Math.floor(maxSide)}` : ''}`;
+        if (this.isDegraded()) {
+            this.lastStatus = 0;                 // ★ 必须清零：否则残留上一次的 404 会让 image_health.ts 误判「图床已删」
+            this.lastError = '图床暂时不可用（熔断中）';
+            log.debug(`图床熔断中，跳过请求：${path}`);
+            return null;
+        }
         const data = await this.requestJson(path, { method: 'GET', headers: this.headers() }, READ_TIMEOUT_MS, '读取模型变体base64');
         if (!data || typeof data.base64 !== 'string' || !data.base64) return null;
         const format = typeof data.format === 'string' ? data.format : '';
@@ -289,24 +301,47 @@ class _ImageHost {
 
     private static async requestJson(path: string, init: any, timeoutMs: number, tag: string): Promise<any | null> {
         const url = this.absolute(path);
+        let response: any;
         try {
-            const response = await withDeadline(() => fetch(url, init), timeoutMs);
-            this.lastStatus = Number(response.status) || 0;
-            const text = await response.text();
-            if (!response.ok) {
-                const snippet = text.length > 160 ? `${text.slice(0, 160)}…` : text;
-                this.lastError = `HTTP ${response.status} ${snippet}`;
-                log.warning(`${tag}失败：HTTP ${response.status} ${text}`);
-                return null;
-            }
-            this.lastError = '';
-            if (!text) return null;
-            return JSON.parse(text);
+            response = await withDeadline(() => fetch(url, init), timeoutMs);
         } catch (error) {
             this.lastStatus = 0;
+            this.noteHealth(0);                          // 网络错误/超时 → 熔断
             const message = error instanceof Error ? error.message : String(error);
             this.lastError = message;
             log.warning(`${tag}请求出错：${message}`);
+            return null;
+        }
+
+        // ★ 健康记账必须紧跟 fetch 之后、读 body 之前：
+        //   放到 text() 之后会把「后端 200 可达但读 body 失败」误记成网络故障（60s 熔断），属误杀。
+        this.lastStatus = Number(response.status) || 0;
+        this.noteHealth(this.lastStatus);
+
+        let text = '';
+        try {
+            text = await response.text();
+        } catch (error) {
+            // 可达但读 body 失败：不改健康状态（上面已按真实 status 记过），只记错误
+            this.lastError = `读取响应失败：${error instanceof Error ? error.message : String(error)}`;
+            log.warning(`${tag}读取响应失败：${this.lastError}`);
+            return null;
+        }
+
+        if (!response.ok) {
+            const snippet = text.length > 160 ? `${text.slice(0, 160)}…` : text;
+            this.lastError = `HTTP ${response.status} ${snippet}`;
+            log.warning(`${tag}失败：HTTP ${response.status} ${text}`);
+            return null;
+        }
+        this.lastError = '';
+        if (!text) return null;
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            // 200 但 body 不是 JSON：保留 lastStatus（原来在 catch 里置 0 → 被误判成网络错误）
+            this.lastError = `响应解析失败：${e instanceof Error ? e.message : String(e)}`;
+            log.warning(`${tag}响应解析失败：${this.lastError}`);
             return null;
         }
     }
@@ -343,6 +378,12 @@ class _ImageHost {
     /** 按 URL 抓取入库；tags 只放类型/内容标签（元数据走 source） */
     static async uploadByUrl(url: string, ref: string, source?: ImageSource, tags?: string[]): Promise<HostItem | null> {
         if (!this.enabled || !url) return null;
+        if (this.isDegraded()) {
+            this.lastStatus = 0;
+            this.lastError = '图床暂时不可用（熔断中）';
+            log.debug('图床熔断中，跳过请求：/api/upload');
+            return null;
+        }
         const body: any = { url, ref };
         if (source) body.source = source;
         if (tags && tags.length) body.tags = tags;
@@ -360,6 +401,12 @@ class _ImageHost {
     /** 直接上传 base64（生图结果等插件已经拿到字节的场景）；tags 只放类型/内容标签 */
     static async uploadBase64(base64: string, format: string, ref: string, source?: ImageSource, tags?: string[]): Promise<HostItem | null> {
         if (!this.enabled || !base64) return null;
+        if (this.isDegraded()) {
+            this.lastStatus = 0;
+            this.lastError = '图床暂时不可用（熔断中）';
+            log.debug('图床熔断中，跳过请求：/api/upload');
+            return null;
+        }
         const body: any = { base64, format: format || 'png', ref };
         if (source) body.source = source;
         if (tags && tags.length) body.tags = tags;
@@ -377,6 +424,12 @@ class _ImageHost {
     /** 取 b64 出口：返回 { base64, format }，失败返回 null */
     static async fetchBase64(hostedId: string): Promise<{ base64: string; format: string } | null> {
         if (!this.enabled || !hostedId) return null;
+        if (this.isDegraded()) {
+            this.lastStatus = 0;
+            this.lastError = '图床暂时不可用（熔断中）';
+            log.debug(`图床熔断中，跳过请求：/i/${hostedId}/b64`);
+            return null;
+        }
         const data = await this.requestJson(`/i/${hostedId}/b64`, { method: 'GET', headers: this.headers() },
             READ_TIMEOUT_MS, '读取图床base64');
         if (!data || typeof data.base64 !== 'string' || !data.base64) return null;

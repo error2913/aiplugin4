@@ -2,13 +2,14 @@
 import Config from "../config/config";
 import { getHost } from "../core/host";
 import { logger } from "../logger";
-import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
 import { generateId } from "../utils/id";
 import { resolveLocalPath } from "../utils/path";
 import { revive, TypeDescriptor } from "../utils/revive";
 import { getPlatform } from "../utils/target_id";
 import { decodeUrlHtmlEntities } from "../utils/url";
 
+import { DEFAULT_TIMEOUT_MS, fetchImageAsBase64 } from "./image_fetch";
+import type { ImageFetchResult } from "./image_fetch";
 import { markModelDownloadFailures, markUrlBrokenByUrls } from "./image_health";
 import type { ImageHealthHost } from "./image_health";
 import { ImageHost } from "./image_host";
@@ -24,7 +25,7 @@ import { IMAGE_PROMPT_TEMPLATE } from "./image_prompt";
 import { parseImageRef, rewriteHostedImageRefs } from "./image_ref";
 import { imageToText } from "./image_text";
 import { base64UrlFor, checkImageUrl, cqCodeFor, getSendFile, srcFor } from "./image_transfer";
-import { isPermanentUrlError, isTemporaryUrl } from "./image_url";
+import { isTemporaryUrl } from "./image_url";
 
 const log = logger.withTag('image');
 
@@ -39,6 +40,9 @@ const IMAGE_LAST_USED_TOUCH_TTL = 60 * 60 * 1000;
 
 // 进行中的 URL→base64 请求，按 Image 实例去重（同一实例并发调用共享同一次请求）
 const pendingUrlToBase64 = new WeakMap<Image, Promise<void>>();
+
+// 「缺少 btoa」只提示一次：极老内核下每张图都报会刷屏
+let btoaWarned = false;
 
 export default class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
@@ -246,6 +250,7 @@ export default class Image {
      */
     async urlToBase64() {
         if (this.type !== 'url') return;
+        if (this.isAvatarImage) return; // 头像走公开 qlogo 地址，不转 base64（也不进图床）
         if (this.isBase64RetryBlocked()) return;
 
         const pending = pendingUrlToBase64.get(this);
@@ -263,52 +268,83 @@ export default class Image {
     }
 
     private async doUrlToBase64() {
-        // 配了图床就只走图床：入库 → 取 b64 出口；失败按现有冷却/永久放弃规则降级，不回退 i2b64
-        if (ImageHost.enabled) {
-            await this.doUrlToBase64ViaHost();
+        if (this.base64) return;
+        if (this.isAvatarImage) return;
+
+        // ── 图床优先 ──
+        if (ImageHost.enabled && !ImageHost.isDegraded()) {
+            await this.tryHostBase64();     // 只写 base64/format 与图床字段，不写失败状态、不 save
+            if (this.base64) {
+                this.resetBase64Failure();
+                Image.save(this);
+                return;
+            }
+        }
+
+        // ── 直连兜底 ──
+        // 无可直连 URL 的三种情况：virtual hosted（无 url）/ urlBroken / hosted 但 url 缺失
+        const hasHttpUrl = !!this.url && /^https?:\/\//i.test(this.url) && !this.urlBroken;
+        if (!hasHttpUrl) {
+            if (this.hostedId && ImageHost.enabled) {
+                // 图床图：1h 后再试，不判永久。★ 必须 save，否则冷却状态重启即丢
+                this.markBase64Cooldown();
+                log.debug(`图片${this.imageId}暂无可直连 URL，等待图床恢复`);
+                Image.save(this);
+            }
+            // 非 hosted 且无 url：什么也做不了（调用方本来就有 url 才会进来）
             return;
         }
-        const { IMAGE_TO_BASE64: imageTobase64Url, IMAGE_TO_BASE64_TOKEN: imageTobase64Token } = Config.backend;
-        try {
-            const response = await fetch(`${imageTobase64Url}/image-to-base64`, {
-                method: 'POST',
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    ...backendAuthHeaders(imageTobase64Token),
-                },
-                body: JSON.stringify({ url: this.src })
-            });
 
-            const text = await response.text();
-            if (!response.ok) throw new Error(`请求失败! 状态码: ${response.status}${backendStatusHint(response.status, 'image-url-to-base64')}\n响应体: ${text}`);
-            if (!text) throw new Error("响应体为空");
+        const result = await fetchImageAsBase64(this.url, { timeoutMs: DEFAULT_TIMEOUT_MS });
+        if (result.ok) {
+            this.base64 = result.data.base64;
+            this.format = result.data.format;
+            this.resetBase64Failure();
+            Image.save(this);
+            return;
+        }
+        // 本仓库 strictNullChecks 关闭，布尔字面量判别联合不会自动缩窄，显式收窄一次
+        const failure = result as Extract<ImageFetchResult, { ok: false }>;
 
-            try {
-                const data = JSON.parse(text);
-                if (data.error) throw new Error(`请求失败! 错误信息: ${data.error.message}`);
-                if (!data.base64 || !data.format) throw new Error(`响应体中缺少base64或format字段`);
-                this.base64 = data.base64;
-                this.format = data.format;
-                this.base64Failed = false;
-                this.base64FailedAt = 0;
-                this.base64FailedCount = 0;
-                this.urlBroken = false;
-            } catch (e) {
-                throw new Error(`解析响应体时出错:${e}\n响应体:${text}`);
+        // ── 失败分类（用结构化 kind，不靠匹配 error 文本）──
+        // no-btoa：运行时缺少 btoa，重试也不会好，但**不得消耗 3 次永久配额**
+        if (failure.kind === 'no-btoa') {
+            if (!btoaWarned) {
+                btoaWarned = true;
+                log.warning(failure.error);
             }
-        } catch (error) {
-            this.markBase64Failure(error);
+            this.markBase64Cooldown();
+            Image.save(this);
+            return;
+        }
+        // oversize：图太大是 URL 的稳定属性，计数没有意义（也不该判永久让 URL 变灰）
+        if (failure.kind === 'oversize') {
+            this.markBase64Cooldown();
+            log.warning(`图片${this.imageId}直连失败（${failure.error}），1h 后再试`);
+            Image.save(this);
+            return;
         }
 
+        if (this.hostedId && ImageHost.enabled) {
+            // 图床图：直连失败不写 URL 失败状态（图床字节仍在），只进冷却避免每轮重试
+            this.markBase64Cooldown();
+            log.warning(`图片${this.imageId}直连也失败（${failure.error}），保留图床状态等待恢复`);
+            Image.save(this);
+            return;
+        }
+
+        // 永久性**只由直连结果决定**（不用 ImageHost.lastStatus 静态量：并发上传/取字节会串味）
+        this.markBase64Failure(new Error(failure.error), failure.permanent);
         Image.save(this);
     }
 
-    /** 配了图床时的转换路径：先确保入库，再从 b64 出口取字节 */
-    private async doUrlToBase64ViaHost() {
+    /**
+     * 图床路径：确保入库 → 取 b64 出口。只写 base64/format 与图床字段，**不写失败状态、不 save、不判永久**。
+     */
+    private async tryHostBase64(): Promise<void> {
         try {
             if (!this.hostedId) {
-                if (!this.url || !/^https?:/i.test(this.url)) throw new Error('该图片没有可上传的 URL');
+                if (!this.url || !/^https?:\/\//i.test(this.url)) throw new Error('该图片没有可上传的 URL');
                 const item = await ImageHost.uploadByUrl(this.url, this.imageId, this.sourceInfo(), this.autoTypeTags());
                 if (!item) throw new Error('上传图床失败' + (ImageHost.lastError ? `：${ImageHost.lastError}` : ''));
                 this.applyHostItem(item);
@@ -317,21 +353,30 @@ export default class Image {
             if (!data) throw new Error('图床 b64 出口失败' + (ImageHost.lastError ? `：${ImageHost.lastError}` : ''));
             this.base64 = data.base64;
             this.format = data.format || this.format || 'png';
-            this.base64Failed = false;
-            this.base64FailedAt = 0;
-            this.base64FailedCount = 0;
             this.urlBroken = false;
         } catch (error) {
-            this.markBase64Failure(error);
+            const message = error instanceof Error ? error.message : String(error);
+            log.debug(`图片${this.imageId}图床取字节失败：${message}`);
         }
-        Image.save(this);
     }
 
-    /** 统一处理转换失败：永久性失败直接放弃，其余计数 + 冷却 */
-    private markBase64Failure(error: unknown) {
+    /** 清空所有转换失败标记（成功后调用） */
+    private resetBase64Failure() {
+        this.base64Failed = false;
+        this.base64FailedAt = 0;
+        this.base64FailedCount = 0;
+        this.urlBroken = false;
+    }
+
+    /** 进 1h 冷却：不累加次数、不判 URL 永久失效（图床图失败 / no-btoa / 超限都用它） */
+    private markBase64Cooldown() {
+        this.base64Failed = true;
+        this.base64FailedAt = Date.now();
+    }
+
+    /** 直连失败：永久性失败直接放弃，其余计数 + 冷却 */
+    private markBase64Failure(error: unknown, permanent: boolean) {
         const message = error instanceof Error ? error.message : String(error);
-        const permanent = isPermanentUrlError(message);
-        // 永久性失败直接按「连续失败达上限」处理：不再按冷却期重试，且不再作为 image_url 交给模型
         this.base64FailedCount = permanent ? IMAGE_BASE64_RETRY_MAX : this.base64FailedCount + 1;
         this.base64Failed = true;
         this.base64FailedAt = Date.now();
@@ -341,7 +386,7 @@ export default class Image {
         } else if (this.base64FailedCount >= IMAGE_BASE64_RETRY_MAX) {
             log.warning('图片' + this.imageId + '连续' + this.base64FailedCount + '次转base64失败，已永久放弃该图片的转换重试');
         }
-        log.exception('在imageUrlToBase64中请求出错', error);
+        log.exception('在图片URL转base64中请求出错', error);
     }
 
     /** 把图床返回的条目写进字段（同时清掉 base64：图床已有字节） */
@@ -476,18 +521,28 @@ export default class Image {
             await this.prepareModelInline(targetSide);
             return;
         }
-        // 旧后端：模型够不到对外地址时沿用“取 b64 出口内联”的旧兜底（受单张内联上限约束）
-        if (!ImageHost.canModelFetch(this.hostedId, model?.baseUrl) && !this.base64) {
+        // 旧后端（无 model-variant）：模型够不到图床对外地址时内联原始字节
+        if (ImageHost.canModelFetch(this.hostedId, model?.baseUrl) || this.base64) return;
+
+        if (this.isBase64RetryBlocked()) {
+            // ★ 回归护栏：升级前已持久化 base64FailedCount=3 或处于 1h 冷却期的老图，
+            //   若这里也早退，旧后端 + 模型够不到对外地址时图块会直接丢失（现状是无条件 fetchBase64）。
+            //   所以 blocked 时**保留旧行为**：直接向图床要一次字节（沿用原顺序与上限判断）。
+            if (ImageHost.isDegraded()) return;
             const data = await ImageHost.fetchBase64(this.hostedId);
-            if (data) {
-                const maxBytes = Math.max(0, Config.image.INLINE_MAX_BYTES_KB) * 1024;
-                if (maxBytes > 0 && Math.floor(data.base64.length * 0.75) > maxBytes) return;
-                this.base64 = data.base64;
-                this.format = data.format || this.format || 'png';
-                this.urlBroken = false;
-                this.ensureSize();
-            }
+            if (!data) return;
+            const maxBytes = Math.max(0, Config.image.INLINE_MAX_BYTES_KB) * 1024;
+            // 与原实现一致：超限时**不**写 this.base64（否则会把超限图塞进内联 → 413）
+            if (maxBytes > 0 && Math.floor(data.base64.length * 0.75) > maxBytes) return;
+            this.base64 = data.base64;
+            this.format = data.format || this.format || 'png';
+            this.urlBroken = false;
+            this.ensureSize();
+            return;
         }
+
+        // 正常路径：urlToBase64 内部已做「图床→直连」单次获取，成功后会写 this.base64/format 并 ensureSize
+        await this.urlToBase64();
     }
 
     /**

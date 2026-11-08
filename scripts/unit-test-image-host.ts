@@ -19,18 +19,38 @@ import { normalizeMCPResult } from "../src/tool/mcp/result";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
 const BACKEND = 'http://test-host:46680';
-const I2B64 = 'http://test-i2b64';
 const SHA64 = 'a'.repeat(64);
 const SHA64_B = 'b'.repeat(64);
 // 真后端用例专用：模块加载时记住 Node 原生 fetch。其它用例会临时替换 globalThis.fetch，
 // 若某个用例异常退出没还原，真后端用例不能被带崩。
 const NODE_FETCH = (globalThis as any).fetch;
+// 「缺少 btoa」用例专用：模块加载时记住 Node 的 latin1 btoa（与海豹同语义）
+const NODE_BTOA = (globalThis as any).btoa;
+// 插件直连兜底用例的字节：必须带真实 magic，否则会被 image_fetch 判「格式无法识别」
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const JPEG_MAGIC = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10];
 
 interface RecordedCall { url: string; init: any; }
 
+/** 伪响应路由：bytes 用来模拟 QQ 图片的原始字节（image_fetch 会把它整体交给 btoa 取 base64） */
+interface MockRoute {
+    match: (url: string) => boolean;
+    status?: number;
+    data?: any;
+    text?: string;
+    /** 原始字节（优先于 data/text）；用来模拟 QQ 图片二进制 */
+    bytes?: number[];
+    headers?: Record<string, string>;
+}
+
+/** 字节数组 → latin-1 字符串（模拟 goja 里 text() 的返回值，btoa 按字节还原） */
+function bytesToBody(bytes: number[]): string {
+    return bytes.map(b => String.fromCharCode(b)).join('');
+}
+
 let calls: RecordedCall[] = [];
 let stored: Record<string, string> = {};
-let routes: Array<{ match: (url: string) => boolean; status?: number; data?: any; text?: string }> = [];
+let routes: MockRoute[] = [];
 
 function resetConfigCache(): void {
     (Config as any).cache = {};
@@ -40,7 +60,6 @@ function useHost(enabled = true, token = 'tok-123', url = BACKEND, publicUrl = '
     TC.stringConfigs['后端配置'] = JSON.stringify({
         version: 1,
         backends: {
-            'image-url-to-base64': { url: I2B64 },
             'image-host': enabled ? { url, token, ...(publicUrl ? { publicUrl } : {}) } : { url: '' },
         },
     });
@@ -55,6 +74,8 @@ function useLoopbackHost(): void {
 function restoreHost(): void {
     delete TC.stringConfigs['后端配置'];
     resetConfigCache();
+    ImageHost.resetCapabilitiesForTest();
+    ImageHost.resetHealthForTest();   // 熔断态是 bundle 内静态：不 reset 会污染后续 40+ 用例
     calls = [];
     routes = [];
 }
@@ -71,12 +92,16 @@ function mockFetch(): void {
     (globalThis as any).fetch = async (url: string, init: any) => {
         calls.push({ url: String(url), init: init || {} });
         const route = routes.find(r => r.match(String(url)));
-        if (!route) return { ok: false, status: 404, text: async () => '{"error":"not_found"}' };
+        if (!route) return { ok: false, status: 404, text: async () => '{"error":"not_found"}', headers: { get: () => null } };
         const status = route.status ?? 200;
+        const h = route.headers || {};
         return {
             ok: status >= 200 && status < 300,
             status,
-            text: async () => (route.text !== undefined ? route.text : JSON.stringify(route.data ?? {})),
+            headers: { get: (k: string) => h[k.toLowerCase()] ?? null },
+            text: async () => (route.bytes
+                ? bytesToBody(route.bytes)
+                : (route.text !== undefined ? route.text : JSON.stringify(route.data ?? {}))),
         };
     };
 }
@@ -361,21 +386,22 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 配了图床后 urlToBase64 只走图床：先入库再取 b64，绝不调 i2b64 */
-    async testHostModeDoesNotUseI2b64(): Promise<void> {
+    /** 图床模式下：先入库再取 b64；既不请求 i2b64 后端，也不回退默认 46678 端口 */
+    async testHostModeNeverRequestsI2b64(): Promise<void> {
         useHost();
         captureStorage();
         mockFetch();
-        routes = [uploadRoute(), b64Route()];
+        routes = [uploadRoute(), b64Route(), { match: (url) => url.startsWith('https://example.com/'), bytes: PNG_MAGIC }];
         try {
             const img = new Image();
-            img.imageId = 'img_route';
+            img.imageId = 'img_no_i2b64';
             img.url = 'https://example.com/a.png';
             await img.urlToBase64();
-            assert.equal(img.base64, 'QUJD');
-            const urls = calls.map(c => c.url);
-            assert.deepEqual(urls, [`${BACKEND}/api/upload`, `${BACKEND}/i/abc123/b64`]);
-            assert.equal(urls.some(u => u.includes('image-to-base64')), false, '不应回退 i2b64');
+            assert.equal(img.base64, 'QUJD', '图床 b64 出口成功');
+            assert.equal(calls.some(c => c.url.includes('image-to-base64')), false, '不得请求 i2b64');
+            assert.equal(calls.some(c => c.url.includes('46678')), false, '也不得回退默认 i2b64 端口');
+            assert.deepEqual(calls.map(c => c.url), [`${BACKEND}/api/upload`, `${BACKEND}/i/abc123/b64`],
+                '图床可用时不应额外发直连请求');
         } finally {
             restoreFetch();
             restoreHost();
@@ -764,7 +790,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         TC.stringConfigs['后端配置'] = JSON.stringify({
             version: 1,
             backends: {
-                'image-url-to-base64': { url: I2B64 },
                 'image-host': { url: base, token },
             },
         });
@@ -1061,7 +1086,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         TC.stringConfigs['后端配置'] = JSON.stringify({
             version: 1,
             backends: {
-                'image-url-to-base64': { url: I2B64 },
                 'image-host': { url: base, token },
             },
         });
@@ -1359,6 +1383,454 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const out = await textToMultimodalContent(`[img:img_temp]`);
             assert.ok(Array.isArray(out));
             assert.deepEqual((out as any[])[0], { type: 'text', text: '[img:img_temp]' });
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    // ───────────────────────── PR2a：i2b64 移除后「插件直连」护栏 ─────────────────────────
+
+    /** 旧配置里残留的 image-url-to-base64 不再注册/读取：只按未知后端名忽略，转换直连原始 URL */
+    async testRemovedBackendConfigIgnored(): Promise<void> {
+        TC.stringConfigs['后端配置'] = JSON.stringify({
+            version: 1,
+            backends: {
+                'image-host': { url: '' },
+                'image-url-to-base64': { url: 'http://i2b64' },
+            },
+        });
+        resetConfigCache();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/removed.png';
+        routes = [{ match: (u) => u === url, bytes: PNG_MAGIC }];
+        try {
+            assert.equal(ImageHost.enabled, false, '图床应关闭');
+            assert.equal('IMAGE_TO_BASE64' in Config.backend, false, '旧后端键不得再注册');
+            assert.equal('IMAGE_TO_BASE64_TOKEN' in Config.backend, false, '旧后端 token 键不得再注册');
+            const img = new Image();
+            img.imageId = 'img_removed_backend';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(calls.length, 1, '只应请求原始 URL');
+            assert.equal(calls[0].url, url);
+            assert.equal(calls.some(c => c.url.includes('i2b64')), false, '不得命中已移除的 i2b64');
+            assert.equal(img.base64, Buffer.from(PNG_MAGIC).toString('base64'));
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 直连 4xx（永久）：直接判 URL 失效、配额拉满 3 次，不再重试 */
+    async testDirect4xxMarksUrlBroken(): Promise<void> {
+        restoreHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/gone.png';
+        routes = [{ match: (u) => u === url, status: 404, text: '{"error":"not_found"}' }];
+        try {
+            assert.equal(ImageHost.enabled, false);
+            const img = new Image();
+            img.imageId = 'img_direct_404';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(img.urlBroken, true, '永久失败应判死 URL');
+            assert.equal(img.base64FailedCount, 3, '永久失败直接拉满配额');
+            assert.equal(img.isBase64RetryBlocked(), true);
+            assert.equal(img.isUrlUnusable(), true);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 直连 5xx（临时）：只进 1h 冷却、计数 +1，不得判死 URL */
+    async testDirect5xxCooldownOnly(): Promise<void> {
+        restoreHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/busy.png';
+        routes = [{ match: (u) => u === url, status: 500, text: '{"error":"boom"}' }];
+        try {
+            const img = new Image();
+            img.imageId = 'img_direct_500';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(img.urlBroken, false, '5xx 不是永久失败');
+            assert.equal(img.base64FailedCount, 1, '临时失败只计 1 次');
+            assert.equal(img.base64Failed, true);
+            assert.equal(img.isBase64RetryBlocked(), true, '应进入 1h 冷却');
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 直连返回真实 JPEG 字节：base64 与字节一一对应、格式按 magic 识别 */
+    async testDirectFetchesRealBytes(): Promise<void> {
+        restoreHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/real.jpg';
+        routes = [{ match: (u) => u === url, bytes: JPEG_MAGIC, headers: { 'content-type': 'image/jpeg' } }];
+        try {
+            const img = new Image();
+            img.imageId = 'img_direct_jpeg';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(img.base64, Buffer.from(JPEG_MAGIC).toString('base64'), 'base64 必须与原始字节完全一致');
+            assert.equal(img.format, 'jpeg', '应按 magic 识别 jpeg');
+            assert.equal(img.type, 'base64');
+            assert.equal(img.base64FailedCount, 0, '成功后失败标记应清零');
+            assert.equal(img.urlBroken, false);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 200 但不是图片（text/html）：按非永久失败处理，不得判死 URL、不得清零配额 */
+    async testNonImage200DoesNotMarkBroken(): Promise<void> {
+        restoreHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/page.html';
+        routes = [{
+            match: (u) => u === url,
+            text: '<html><body>not an image</body></html>',
+            headers: { 'content-type': 'text/html' },
+        }];
+        try {
+            const img = new Image();
+            img.imageId = 'img_non_image';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(img.base64, '', '非图片不应产出 base64');
+            assert.equal(img.urlBroken, false, '内容不是图片不是永久失败');
+            assert.equal(img.base64FailedCount, 1, '非永久失败只计 1 次');
+            assert.equal(img.base64Failed, true);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 运行时缺 btoa：不得消耗 3 次永久配额，只进冷却，且「缺少 btoa」只提示一次 */
+    async testNoBtoaDoesNotBurnQuota(): Promise<void> {
+        restoreHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/nobtoa.png';
+        routes = [{ match: (u) => u === url, bytes: PNG_MAGIC }];
+        const warns: string[] = [];
+        const origWarn = console.warn;
+        console.warn = (...args: any[]) => { warns.push(args.map(a => String(a)).join(' ')); };
+        delete (globalThis as any).btoa;
+        try {
+            const img = new Image();
+            img.imageId = 'img_no_btoa';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(img.base64, '');
+            assert.equal(img.base64FailedCount, 0, '缺 btoa 不得消耗永久配额');
+            assert.equal(img.urlBroken, false, '缺 btoa 与 URL 有效性无关');
+            assert.equal(img.base64Failed, true, '仍应进入 1h 冷却');
+            assert.equal(img.isBase64RetryBlocked(), true);
+            assert.equal(calls.length, 0, '能力检查在任何请求之前，不该发请求');
+            assert.equal(warns.filter(w => w.includes('缺少 btoa')).length, 1, '「缺少 btoa」只提示一次');
+        } finally {
+            (globalThis as any).btoa = NODE_BTOA;
+            console.warn = origWarn;
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 图床 b64 出口 500：改走插件直连，成功后失败标记全清 */
+    async testHostFailureFallsBackToDirect(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/fallback.png';
+        routes = [
+            { match: (u) => u.endsWith('/i/abc123/b64'), status: 500, text: '{"error":"boom"}' },
+            { match: (u) => u === url, bytes: PNG_MAGIC },
+        ];
+        try {
+            const img = new Image();
+            img.imageId = 'img_host_500';
+            img.url = url;
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            await img.urlToBase64();
+            assert.equal(img.base64, Buffer.from(PNG_MAGIC).toString('base64'), '直连兜底应成功');
+            assert.equal(img.urlBroken, false);
+            assert.equal(img.base64FailedCount, 0, '成功即清零');
+            assert.equal(img.base64Failed, false);
+            assert.equal(calls.length, 2);
+            assert.ok(calls[0].url.endsWith('/i/abc123/b64'), '先走图床 b64 出口');
+            assert.equal(calls[1].url, url, '图床失败后直连原始 URL');
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 图床报「上游 404」（500 + upstream_status:404）：直连 200 时仍保留图片，不得判死 */
+    async testHostUpstream4xxAndDirect200KeepsImage(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/upstream404.png';
+        routes = [
+            { match: (u) => u.endsWith('/i/abc123/b64'), status: 500, text: '{"error":"fetch_failed","upstream_status":404}' },
+            { match: (u) => u === url, bytes: PNG_MAGIC },
+        ];
+        try {
+            const img = new Image();
+            img.imageId = 'img_upstream_404';
+            img.url = url;
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            await img.urlToBase64();
+            assert.equal(img.base64, Buffer.from(PNG_MAGIC).toString('base64'));
+            assert.equal(img.urlBroken, false, '图床上游 404 不得判死（永久性只来自直连）');
+            assert.equal(img.hostedId, 'abc123', '图床 id 应保留');
+            assert.equal(img.base64FailedCount, 0, '成功即清零');
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 只有直连结果决定永久性：图床不可用 + 直连 400 → 判死 URL、配额拉满 */
+    async testBothPermanentMarksBroken(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/both.png';
+        routes = [
+            { match: (u) => u === `${BACKEND}/api/upload`, status: 500, text: '{"error":"down"}' },
+            { match: (u) => u === url, status: 400, text: '{"error":"bad_request"}' },
+        ];
+        try {
+            const img = new Image();
+            img.imageId = 'img_both_dead';
+            img.url = url;
+            await img.urlToBase64();
+            assert.equal(img.urlBroken, true, '直连 400 = 永久失败');
+            assert.equal(img.base64FailedCount, 3);
+            assert.equal(img.hostedId, '', '上传失败不应留下图床 id');
+            assert.equal(img.isUrlUnusable(), true);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 图床图（字节仍在图床）+ 图床熔断 + 直连 404：只进冷却，不得清图床/判死 URL */
+    async testHostedDirectFailureDoesNotBreakUrl(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/hosted.png';
+        routes = [{ match: (u) => u === url, status: 404, text: '{"error":"not_found"}' }];
+        try {
+            (ImageHost as any).unhealthyUntil = Date.now() + 60_000;   // 熔断：跳过图床
+            const img = new Image();
+            img.imageId = 'img_hosted_direct_404';
+            img.url = url;
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            await img.urlToBase64();
+            assert.equal(img.urlBroken, false, '图床字节仍在，不得判死 URL');
+            assert.equal(img.base64Failed, true, '只进 1h 冷却');
+            assert.equal(img.base64FailedCount, 0, '图床图直连失败不计数');
+            assert.equal(img.hostedId, 'abc123', '不得清图床 id');
+            assert.equal(calls.length, 1, '熔断时不得再请求图床');
+            assert.equal(calls[0].url, url);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 图床 5xx 一次即熔断 60s：第二次数据面请求直接跳过（不发请求），reset 后恢复 */
+    async testHostBreakerTripsAndSkips(): Promise<void> {
+        useHost();
+        mockFetch();
+        routes = [{ match: (u) => u.endsWith('/i/abc123/b64'), status: 500, text: '{"error":"boom"}' }];
+        try {
+            assert.equal(await ImageHost.fetchBase64('abc123'), null);
+            assert.equal(ImageHost.isDegraded(), true, '5xx 应熔断');
+            assert.equal(calls.length, 1);
+            assert.equal(await ImageHost.fetchBase64('abc123'), null, '熔断期返回 null');
+            assert.equal(calls.length, 1, '熔断期不得再发请求');
+            ImageHost.resetHealthForTest();
+            assert.equal(ImageHost.isDegraded(), false, 'resetHealthForTest 后应恢复');
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 图床 401：host 可达（只是鉴权错），不得熔断 */
+    async testHost401DoesNotTripBreaker(): Promise<void> {
+        useHost();
+        mockFetch();
+        routes = [{ match: (u) => u.endsWith('/i/abc123/b64'), status: 401, text: '{"error":"unauthorized"}' }];
+        try {
+            assert.equal(await ImageHost.fetchBase64('abc123'), null);
+            assert.equal(ImageHost.lastStatus, 401);
+            assert.equal(ImageHost.isDegraded(), false, '401 说明后端可达，不熔断');
+            assert.equal(calls.length, 1);
+            assert.equal(ImageHost.lastError.includes('401'), true);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 熔断 gate 必须把 lastStatus 清零：否则残留 404 会让 image_health 误判「图床已删」 */
+    async testDegradedGateResetsLastStatus(): Promise<void> {
+        useHost();
+        captureStorage();
+        mockFetch();
+        ImageHost.capabilities = ['model-variant'];
+        routes = [{ match: (u) => u.endsWith('/i/abc123/b64'), status: 404, text: '{"error":"not_found"}' }];
+        try {
+            assert.equal(await ImageHost.fetchBase64('abc123'), null);
+            assert.equal(ImageHost.lastStatus, 404, '先制造一次 404 残留');
+            (ImageHost as any).unhealthyUntil = Date.now() + 60_000;
+            assert.equal(await ImageHost.fetchModelBase64('abc123', 0), null);
+            assert.equal(ImageHost.lastStatus, 0, '熔断 gate 必须清零，否则下游误判图床已删');
+
+            const img = new Image();
+            img.imageId = 'img_degraded_gate';
+            img.url = 'https://example.com/degraded.png';
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            Image.imageMap['img_degraded_gate'] = img;
+            // 注意：imageMap 里可能残留其它用例的同 id 图（本用例只管自己的那张）
+            const res = await Image.markModelDownloadFailures([`${BACKEND}/i/abc123`]);
+            assert.equal(res.marked, 0, '熔断期不得判「图床已删」');
+            assert.equal(res.excludeIds.includes('img_degraded_gate'), true, '本轮应临时排除');
+            assert.equal(img.hostedId, 'abc123', '不得清图床 id');
+            assert.equal(img.urlBroken, false);
+        } finally {
+            delete Image.imageMap['img_degraded_gate'];
+            ImageHost.resetCapabilitiesForTest();
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 头像走公开 qlogo 地址：urlToBase64 直接返回，零请求 */
+    async testAvatarNoFetchOnUrlToBase64(): Promise<void> {
+        useHost();
+        mockFetch();
+        try {
+            const avatar = Image.getUserAvatar('QQ:12345');
+            assert.equal(avatar.url.startsWith('https://q1.qlogo.cn/'), true);
+            await avatar.urlToBase64();
+            assert.equal(calls.length, 0, '头像不应触发任何请求');
+            assert.equal(avatar.base64, '');
+            assert.equal(avatar.base64Failed, false);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    // ───────────────────────── PR2b：发送路径 / ensureModelSource 回归 ─────────────────────────
+
+    /** 回环图床熔断：getSendFile 直接走插件直连取字节，不再白等图床超时 */
+    async testGetSendFileDirectFallbackOnDegradedHost(): Promise<void> {
+        useLoopbackHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/send_fallback.png';
+        routes = [
+            { match: (u) => u.endsWith('/i/abc123/b64'), status: 500, text: '{"error":"boom"}' },
+            { match: (u) => u === url, bytes: PNG_MAGIC },
+        ];
+        try {
+            assert.equal(await ImageHost.fetchBase64('abc123'), null);
+            assert.equal(ImageHost.isDegraded(), true);
+            calls = [];   // 只数发送路径的请求
+            const img = new Image();
+            img.imageId = 'img_send_fallback';
+            img.url = url;
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            const expected = `/tmp/aiplugin4-test-media-${Buffer.from(PNG_MAGIC).toString('base64').length}.bin`;
+            const file = await img.getSendFile();
+            assert.equal(file, expected, '应落成本地文件');
+            assert.equal(file.includes('127.0.0.1'), false);
+            assert.equal(calls.length, 1, '只应发一次直连请求');
+            assert.equal(calls[0].url, url);
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 已判死的 URL：getSendFile 不得再发直连请求（不白等 8s），回退原始 URL 交给协议端 */
+    async testGetSendFileSkipsBrokenUrl(): Promise<void> {
+        useLoopbackHost();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/broken.png';
+        routes = [{ match: (u) => u.endsWith('/i/abc123/b64'), status: 500, text: '{"error":"boom"}' }];
+        try {
+            assert.equal(await ImageHost.fetchBase64('abc123'), null);
+            assert.equal(ImageHost.isDegraded(), true);
+            calls = [];
+            const img = new Image();
+            img.imageId = 'img_send_broken';
+            img.url = url;
+            img.urlBroken = true;
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            const file = await img.getSendFile();
+            assert.equal(file, url, '应回退原始 URL');
+            assert.equal(calls.length, 0, '已判死不得再发直连请求');
+        } finally {
+            restoreFetch();
+            restoreHost();
+        }
+    },
+
+    /** 回归护栏（A8）：老后端 + 已 blocked 的老图，模型够不到图床时仍要向图床要一次字节 */
+    async testEnsureModelSourceBlockedRegression(): Promise<void> {
+        useHost(true, 'tok-123', 'http://127.0.0.1:46680', 'http://192.168.1.10:46680');
+        ImageHost.resetCapabilitiesForTest();
+        captureStorage();
+        mockFetch();
+        const url = 'https://example.com/old_blocked.png';
+        routes = [
+            { match: (u) => u.endsWith('/i/abc123/b64'), data: { base64: 'QUJD', format: 'png' } },
+            { match: (u) => u === url, bytes: PNG_MAGIC },
+        ];
+        try {
+            const img = new Image();
+            img.imageId = 'img_old_blocked';
+            img.url = url;
+            img.hostedId = 'abc123';
+            img.hostedUrl = '/i/abc123';
+            img.base64Failed = true;
+            img.base64FailedAt = Date.now();
+            img.base64FailedCount = 3;
+            assert.equal(ImageHost.supportsModelVariant, false, '旧后端无 model-variant');
+            assert.equal(ImageHost.canModelFetch('abc123', 'https://api.openai.com'), '', '模型够不到对外地址');
+            await img.ensureModelSource({ baseUrl: 'https://api.openai.com' });
+            assert.equal(img.base64, 'QUJD', '仍应向图床要一次字节，图片不能丢');
+            assert.equal(img.format, 'png');
+            assert.equal(calls.length, 1, '只应走图床 b64，不得再直连');
+            assert.ok(calls[0].url.endsWith('/i/abc123/b64'));
+            assert.equal(calls.some(c => c.url === url), false, 'urlToBase64 不应被调用');
         } finally {
             restoreFetch();
             restoreHost();

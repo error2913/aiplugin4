@@ -3,6 +3,7 @@
 // 均由宿主提供），实例 getter/method 保留同名委派；便于单测与将来替换图床。
 import { logger } from "../logger";
 
+import { fetchImageAsBase64 } from "./image_fetch";
 import { ImageHost } from "./image_host";
 
 const log = logger.withTag('image');
@@ -21,6 +22,8 @@ export interface ImageTransferHost {
     readonly hosted: boolean;
     /** 图床对外绝对地址（不可用时回退原始 url） */
     readonly remoteUrl: string;
+    /** URL 已确认永久失效（Image 实例本来就有该字段，直接满足结构类型） */
+    urlBroken?: boolean;
 }
 
 /** data URL（base64 来源） */
@@ -58,12 +61,23 @@ export async function getSendFile(img: ImageTransferHost): Promise<string> {
     if (img.base64) return seal.base64ToImage(img.base64);
     if (img.hosted && ImageHost.externalEnabled) return img.remoteUrl;
     if (img.hosted) {
-        const data = await ImageHost.fetchBase64(img.hostedId);
-        if (data && data.base64) return seal.base64ToImage(data.base64);
-        log.warning(`图片${img.imageId}从图床取字节失败，无法生成本地文件`
+        // 图床对外地址不可用（回环）：需要本地文件。图床熔断时直接用插件直连，不再白等一次超时
+        let b64 = '';
+        if (!ImageHost.isDegraded()) {
+            const data = await ImageHost.fetchBase64(img.hostedId);
+            if (data && data.base64) b64 = data.base64;
+        }
+        // 兜底 1：插件直连原始 URL（8s 上限；这是发送路径，不能久等）
+        //   已判死的 URL 不要白等 8s —— `!img.urlBroken` 守卫
+        if (!b64 && !img.urlBroken && img.url && /^https?:\/\//i.test(img.url)) {
+            const direct = await fetchImageAsBase64(img.url, { timeoutMs: 8_000 });
+            if (direct.ok) b64 = direct.data.base64;
+        }
+        if (b64) return seal.base64ToImage(b64);
+        log.warning(`图片${img.imageId}从图床与直连都取不到字节，无法生成本地文件`
             + (ImageHost.lastError ? `：${ImageHost.lastError}` : '')
             + '；请检查图床地址是否可从插件访问');
-        // 兜底：原始 http(s) 链接（可能已过期，但总比回环地址强）
+        // 兜底 2：原始 http(s) 链接（可能已过期，但总比回环地址强）
         if (img.url && /^https?:\/\//i.test(img.url)) return img.url;
         return '';
     }

@@ -258,9 +258,10 @@ export async function fetchData(
                 return jsonText;
             }
         }
-        // 海豹 goja 的 fetch（gojax）只给 Response 实现了 text()/json()，**没有 arrayBuffer/bytes/blob**，
-        // 且 text() 走 UTF-8 解码会破坏二进制字节。走到这里说明后端地址为空（显式禁用中转），
-        // 只能给出可读报错。
+        // 海豹 goja 的 fetch（gojax）只给 Response 实现了 text()/json()，**没有 arrayBuffer/bytes/blob**；
+        // text() 的返回值一旦被 JS 字符串操作（拼接/切片/JSON 化）就会被 UTF-8 扫描、非法字节变 U+FFFD，
+        // 只有「原样整体交给 btoa」才无损（见 resource/image_fetch.ts）；本函数需要字节做后续处理，
+        // 走到这里说明 media-fetch 后端地址为空（显式禁用中转），只能给出可读报错。
         if (typeof (response as any).arrayBuffer !== 'function') {
             throw mediaReadUnsupportedError(ct);
         }

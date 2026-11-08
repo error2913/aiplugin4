@@ -495,7 +495,7 @@ export class MediaTaskManager {
         if (!task.result) return 'No result';
         if (task.result.send) return task.result.send;
         const id = task.result.imageId ?? task.result.data;
-        return `(generated but could not be converted to a sendable format, ID: ${id}; check the address and token of backends.image-host / backends.image-url-to-base64 under "Backend settings", or use media_tasks to inspect)`;
+        return `(generated but could not be converted to a sendable format, ID: ${id}; if an image-host backend is configured, check its address and token under "Backend settings" (the plugin also tried downloading the image directly — see logs); or use media_tasks to inspect)`;
     }
 
     private static deliver(task: MediaTask): void {

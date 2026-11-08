@@ -13,7 +13,6 @@ export const BACKEND_CONFIG_VERSION = 1;
 
 export type BackendName =
     | 'stream-output'
-    | 'image-url-to-base64'
     | 'image-host'
     | 'media-fetch'
     | 'usage-chart'
@@ -36,7 +35,6 @@ export interface BackendConfig {
 
 /** 固定顺序：与 aiplugin4-backends 注册表一致，保证生成的 JSON 顺序稳定 */
 export const BACKEND_NAMES: BackendName[] = [
-    'image-url-to-base64',
     'media-fetch',
     'stream-output',
     'usage-chart',
@@ -49,9 +47,8 @@ const OPTIONAL_URL_BACKENDS = new Set<BackendName>(['image-host', 'media-fetch']
 /** WebSocket 后端 */
 const WS_BACKENDS = new Set<BackendName>(['ob11-core-bridge']);
 
-/** 出厂默认地址（与旧版 8 个配置项的默认值一致） */
+/** 出厂默认地址（与旧版独立配置项的默认值一致；image-url-to-base64 已于 4.31.0 移除，改由插件直连） */
 export const DEFAULT_BACKENDS: Record<BackendName, BackendEndpoint> = {
-    'image-url-to-base64': { url: 'http://127.0.0.1:46678', token: '' },
     'media-fetch': { url: 'http://127.0.0.1:46679', token: '' },
     'stream-output': { url: 'http://localhost:3010', token: '' },
     'usage-chart': { url: 'http://127.0.0.1:3009', token: '' },

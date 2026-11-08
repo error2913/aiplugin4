@@ -79,12 +79,10 @@ export async function imageToText(host: ImageTextHost, prompt = ''): Promise<voi
 
     host.description = truncateIfLong(host, await model.callITT(src, prompt ? prompt : defaultPrompt));
 
-    // 图床：首次给了 URL 但模型没识别出来 → 用 b64 再试一次（不依赖“自动”配置；宁可多一次本地请求）
+    // 图床：首次给了 URL 但模型没识别出来 → 用本地字节再试一次（图床熔断/不可用时自动回退插件直连）
     if (!host.description && host.hosted && host.hostedId) {
-        const data = await ImageHost.fetchBase64(host.hostedId);
-        if (data) {
-            host.base64 = data.base64;
-            host.format = data.format || host.format || 'png';
+        if (!host.isBase64RetryBlocked()) await host.urlToBase64();
+        if (host.base64) {
             host.description = truncateIfLong(host, await model.callITT(host.base64Url, prompt ? prompt : defaultPrompt));
         }
     }

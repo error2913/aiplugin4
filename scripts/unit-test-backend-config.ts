@@ -28,8 +28,6 @@ function clearBackendConfig(): void {
 const DEFAULTS = {
     STREAM: 'http://localhost:3010',
     STREAM_TOKEN: '',
-    IMAGE_TO_BASE64: 'http://127.0.0.1:46678',
-    IMAGE_TO_BASE64_TOKEN: '',
     IMAGE_HOST: '',
     IMAGE_HOST_PUBLIC_URL: '',
     IMAGE_HOST_TOKEN: '',
@@ -59,7 +57,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             version: 1,
             backends: {
                 'stream-output': { url: 'http://stream:3010/', token: 'stream-token' },
-                'image-url-to-base64': { url: 'http://i2b64:46678', token: 'i2b64-token' },
                 'image-host': {
                     url: 'http://127.0.0.1:46680',
                     publicUrl: 'http://192.168.1.10:46680/',
@@ -73,8 +70,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.deepEqual(Config.backend, {
             STREAM: 'http://stream:3010',
             STREAM_TOKEN: 'stream-token',
-            IMAGE_TO_BASE64: 'http://i2b64:46678',
-            IMAGE_TO_BASE64_TOKEN: 'i2b64-token',
             IMAGE_HOST: 'http://127.0.0.1:46680',
             IMAGE_HOST_PUBLIC_URL: 'http://192.168.1.10:46680',
             IMAGE_HOST_TOKEN: 'host-token',
@@ -126,7 +121,6 @@ export const tests: Record<string, () => void | Promise<void>> = {
             backends: { 'stream-output': { url: 'http://only-stream:3010' } },
         }));
         assert.equal(Config.backend.STREAM, 'http://only-stream:3010');
-        assert.equal(Config.backend.IMAGE_TO_BASE64, DEFAULTS.IMAGE_TO_BASE64);
         assert.equal(Config.backend.IMAGE_HOST, '');
         assert.equal(Config.backend.CORE_BRIDGE_WS_URL, DEFAULTS.CORE_BRIDGE_WS_URL);
     },
@@ -191,11 +185,50 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     testRequiredUrlCannotBeEmpty() {
-        for (const name of ['stream-output', 'image-url-to-base64', 'usage-chart', 'ob11-core-bridge']) {
+        for (const name of ['stream-output', 'usage-chart', 'ob11-core-bridge']) {
             const result = parseBackendConfig(JSON.stringify({ version: 1, backends: { [name]: { url: '' } } }));
             assert.equal(result.config, null, name);
             assert.ok(result.issues.some(i => i.path === `$.backends.${name}.url`), name);
         }
+    },
+
+    /** issue #162：image-url-to-base64 已从 BACKEND_NAMES 移除，配置里残留只当作未知后端名忽略 */
+    testRemovedBackendNameFallsBackToUnknownWarning() {
+        const result = parseBackendConfig(JSON.stringify({
+            version: 1,
+            backends: {
+                'image-url-to-base64': { url: 'http://i2b64:46678', token: 't' },
+                'stream-output': { url: 'http://stream:3010' },
+            },
+        }));
+        assert.ok(result.config, JSON.stringify(result.issues));
+        assert.equal(Object.keys(result.config!.backends).includes('image-url-to-base64' as any), false, '不得注册已移除的后端');
+        assert.equal(result.warnings.length, 1, '应只有一条未知后端名 warning');
+        assert.match(result.warnings[0].path, /image-url-to-base64/);
+        assert.match(result.warnings[0].msg, /未知后端名/, '按未知后端名处理（不再有专门的兼容层）');
+        assert.equal('IMAGE_TO_BASE64' in Config.backend, false, 'Config.backend 不得再暴露宿主 i2b64 地址');
+    },
+
+    /** 已移除的后端名不影响同批其它后端的解析（不能整份拒绝/解析失败） */
+    testRemovedBackendDoesNotBlockOthers() {
+        setBackendConfig(JSON.stringify({
+            version: 1,
+            backends: {
+                'image-url-to-base64': { url: 'http://i2b64:46678' },
+                'image-host': { url: 'http://host:46680', token: 'h' },
+                'stream-output': { url: 'http://stream:3010', token: 's' },
+            },
+        }));
+        assert.equal(Config.backend.STREAM, 'http://stream:3010', '其它后端照常生效');
+        assert.equal(Config.backend.IMAGE_HOST, 'http://host:46680');
+        assert.equal(Config.backend.IMAGE_HOST_TOKEN, 'h');
+        assert.equal(Config.backend.STREAM_TOKEN, 's', '残留已移除项不应导致整份回退出厂默认');
+    },
+
+    testBackendNamesExcludesRemovedBackend() {
+        assert.equal(BACKEND_NAMES.includes('image-url-to-base64' as any), false, '注册表名清单不得含已移除后端');
+        assert.equal(BACKEND_NAMES.length, 5, '移除后只剩 5 个后端');
+        assert.deepEqual(Object.keys(resolveBackendEndpoints(null)), BACKEND_NAMES);
     },
 
     testUrlSchemeCheckedPerBackend() {

@@ -18,6 +18,7 @@ const bundles = {
     v5: path.join(outDir, 'unit-v5.cjs'),
     web: path.join(outDir, 'unit-web.cjs'),
     imageHost: path.join(outDir, 'unit-image-host.cjs'),
+    imageFetch: path.join(outDir, 'unit-image-fetch.cjs'),
     backendConfig: path.join(outDir, 'unit-backend-config.cjs'),
     boot: path.join(outDir, 'unit-boot.cjs'),
     contextV2: path.join(outDir, 'unit-context-v2.cjs'),
@@ -70,6 +71,7 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['v5', path.join(repo, 'scripts/unit-test-v5.ts')],
         ['web', path.join(repo, 'scripts/unit-test-web.ts')],
         ['imageHost', path.join(repo, 'scripts/unit-test-image-host.ts')],
+        ['imageFetch', path.join(repo, 'scripts/unit-test-image-fetch.ts')],
         ['backendConfig', path.join(repo, 'scripts/unit-test-backend-config.ts')],
         // 独立启动装配回归入口（首次 Config.registerConfig()，验证配置应用时机）
         ['boot', path.join(repo, 'scripts/unit-test-boot.ts')],

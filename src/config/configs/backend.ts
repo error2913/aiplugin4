@@ -2,6 +2,8 @@
 //
 // 不迁移、不兼容：旧的 8 个独立键（流式输出/图片转base64/图床/图床Token/媒体转base64/
 // 用量图表/核心桥WS地址/核心桥Token）不再注册、也不再读取。
+// image-url-to-base64 后端已于 4.31.0 移除（issue #162）：图片 URL→base64 改由插件纯海豹 API 直连完成，
+// 配置里残留该项只会得到一条「未知后端名，已忽略」的警告，不会被读取。
 // 空文本 = 全部使用出厂默认地址（不报错）；校验失败整份拒绝并回退出厂默认。
 import Logger from "../../logger";
 import { parseBackendConfig, resolveBackendEndpoints } from "../domain/backend";
@@ -46,8 +48,6 @@ export default class BackendConfig {
         return {
             STREAM: endpoints['stream-output'].url,
             STREAM_TOKEN: endpoints['stream-output'].token,
-            IMAGE_TO_BASE64: endpoints['image-url-to-base64'].url,
-            IMAGE_TO_BASE64_TOKEN: endpoints['image-url-to-base64'].token,
             IMAGE_HOST: endpoints['image-host'].url,
             IMAGE_HOST_PUBLIC_URL: endpoints['image-host'].publicUrl || '',
             IMAGE_HOST_TOKEN: endpoints['image-host'].token,
