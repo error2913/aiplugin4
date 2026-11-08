@@ -402,15 +402,28 @@ export class QuotaManager {
         const key = `${sessionId || ''}|${denial.window}|${dimension}`;
         if (this.notified.get(key) === windowKey) return false;
         this.notified.set(key, windowKey);
-        // 表可能随会话数无限增长：超过阈值时清掉已过窗口的键
-        if (this.notified.size > 4096) {
-            for (const [name, seen] of this.notified) {
-                const window = denial.window;
-                if (seen !== windowKey) this.notified.delete(name);
-                else void window;
-            }
-        }
+        // 表可能随会话数无限增长：超过阈值时按「各自窗口」清理已过期的键
+        if (this.notified.size > 4096) this.pruneNotified(now);
         return true;
+    }
+
+    /**
+     * 清理节流表里已过窗口的键。
+     *
+     * 键格式是 `会话|窗口|维度`，`seen` 是**该键所属窗口**的窗口键；因此必须按各自窗口重新
+     * 求当前键再比对，不能用「本次拒绝的窗口键」比 —— 否则会把其它窗口的**有效**记录一并删掉，
+     * 导致刚被拒的会话再收到一次提示。
+     */
+    private static pruneNotified(now: number): void {
+        const current: Record<WindowKey, string> = {
+            h: windowKeyOf('h', now),
+            w: windowKeyOf('w', now),
+            m: windowKeyOf('m', now),
+        };
+        for (const [key, seen] of this.notified) {
+            const window = key.split('|')[1] as WindowKey;
+            if (seen !== current[window]) this.notified.delete(key);
+        }
     }
 
     /** 拒绝文案（纯函数，无副作用；`limit === Infinity` 不会走到这里，但保留兜底） */

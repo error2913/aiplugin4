@@ -514,6 +514,27 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(QuotaManager.estimateChat('no-such-model', 1000), 1000, 'max_tokens 缺省不预留');
     },
 
+    /** AC-10：并发 10 个请求靠预留不会超支（第 11 个被拒） */
+    testConcurrentAdmitDoesNotOverspend() {
+        setup(at(2026, 11, 5, 10, 0), { ENABLED: true, LIMIT_5H: 1000, SESSION_PERCENT: 100, USER_PERCENT: 100 });
+        const handles = [];
+        for (let i = 0; i < 10; i++) {
+            // 每个预留 100：10 × 100 = 1000，正好用满但未超（strict 要求 used + est < limit，
+            // 第 10 个是 900 + 100 >= 1000 ⇒ 应被拒，故实际只成功 9 个，剩余 100 的余量）
+            try {
+                handles.push(QuotaManager.admitChat({ sessionId: 'S1', userId: 'U1' }, 100));
+            } catch (error) {
+                assert.ok(error instanceof QuotaExceededError, '只能是配额拒绝');
+            }
+        }
+        const totalReserved = QuotaManager.inflightSnapshotForTest().total;
+        assert.equal(handles.length, 9, `应恰好成功 9 个（实际 ${handles.length}）`);
+        assert.equal(totalReserved, 900, '预留总量必须与实际成功数一致');
+        assert.ok(totalReserved < 1000, '预留不得超支（总量严格小于上限）');
+        for (const handle of handles) handle.release();
+        assert.equal(QuotaManager.inflightSnapshotForTest().total, 0, '全部 release 后归零');
+    },
+
     // ---------------- 第 6 组：降级链路 ----------------
 
     /** 开关关闭：只统计不拦截（一键关停） */
@@ -622,6 +643,25 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const denial = { window: 'h' as const, dimension: 'total' as const, used: 1, limit: 1 };
         assert.equal(QuotaManager.notifyOnce('S1', denial), false);
         assert.equal(QuotaManager.notifyOnce('S1', denial), false);
+    },
+
+    /**
+     * 节流表超阈值清理：必须按**各自窗口**判过期，不能用本次拒绝的窗口键比，
+     * 否则一次 5 小时维度的拒绝会把「本周/本月」的有效节流记录一起删掉、重复提示。
+     */
+    testNotifyPruneKeepsOtherWindows() {
+        setup(at(2026, 11, 5, 10, 0), { ENABLED: true });
+        const week = QuotaManager.notifyOnce('S-week', { window: 'w', dimension: 'total', used: 1, limit: 1 });
+        assert.equal(week, true, '本周维度首次应提示');
+        // 灌满超过 4096 条后触发一次 5 小时维度的提示，从而触发 prune
+        for (let i = 0; i < 4100; i++) {
+            QuotaManager.notifyOnce(`S${i}`, { window: 'h', dimension: 'total', used: 1, limit: 1 });
+        }
+        assert.equal(
+            QuotaManager.notifyOnce('S-week', { window: 'w', dimension: 'total', used: 1, limit: 1 }),
+            false,
+            '同期「本周」记录不得被 5 小时维度的清理误删',
+        );
     },
 
     /** 拒绝文案：窗口/维度/重置时刻都要正确，且不暴露 token 数字 */
