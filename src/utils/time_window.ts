@@ -51,7 +51,38 @@ export function parseTimeSegment(text: string): { segment?: ActiveTimeSegment; e
     return { segment: { start, end, segs } };
 }
 
-function segmentsOverlap(a: ActiveTimeSegment, b: ActiveTimeSegment): boolean {
+/** 一个纯时间范围（不含分段/百分比语义），用于配额峰谷时段 */
+export interface ParsedTimeRange {
+    /** 开始（当天分钟数，0~1439） */
+    start: number;
+    /** 结束（当天分钟数；跨零点时 end < start），语义「含开始不含结束」 */
+    end: number;
+}
+
+const TIME_RANGE = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/;
+
+/**
+ * 解析 `HH:mm-HH:mm`（允许跨 0 点，start≠end）。
+ * 不复用 {@link parseTimeSegment}：后者第三段是「分段数」且有 `segs ≤ 时段分钟数` 校验，
+ * 无法承载峰谷时段的百分比。
+ */
+export function parseTimeRange(text: string, label = '时间范围'): { range?: ParsedTimeRange; error?: string } {
+    const raw = String(text ?? '').trim();
+    if (!raw) return { error: '' };
+    const m = TIME_RANGE.exec(raw);
+    if (!m) return { error: `${label}格式错误（应为 HH:mm-HH:mm）：${raw}` };
+    const startH = Number(m[1]);
+    const startM = Number(m[2]);
+    const endH = Number(m[3]);
+    const endM = Number(m[4]);
+    if (startH > 23 || endH > 23 || startM > 59 || endM > 59) return { error: `${label}超出范围：${raw}` };
+    const start = startH * 60 + startM;
+    const end = endH * 60 + endM;
+    if (start === end) return { error: `${label}开始和结束不能相同：${raw}` };
+    return { range: { start, end } };
+}
+
+export function segmentsOverlap(a: ActiveTimeSegment, b: ActiveTimeSegment): boolean {
     const toRange = (seg: ActiveTimeSegment): Array<[number, number]> => {
         if (seg.end >= seg.start) return [[seg.start, seg.end]];
         return [[seg.start, 24 * 60], [0, seg.end]];
@@ -85,7 +116,7 @@ export function parseTimeSegments(texts: readonly string[] | undefined): ParsedT
     return { segments, warnings };
 }
 
-function isInSegment(segment: ActiveTimeSegment, minuteOfDay: number): boolean {
+export function isInSegment(segment: ActiveTimeSegment, minuteOfDay: number): boolean {
     if (segment.end >= segment.start) return minuteOfDay >= segment.start && minuteOfDay < segment.end;
     return minuteOfDay >= segment.start || minuteOfDay < segment.end;
 }
