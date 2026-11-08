@@ -54,6 +54,7 @@ function advanceTimer(timer: TimerInfo, consumed: boolean): void {
     if (!isModeTimer(timer) && !ruleTimerStillActive(ruleId, timer.sid)) return;
     if (!consumed) {
         // 未消费（门不通过/未真正起轮）：interval 保持原次数等下一轮；target 不补
+        // quota（用量限制拒绝）与 deferred 同义：不消费次数
         if (timer.type === 'interval' && timer.interval > 0) {
             addRuleTimer(
                 { sid: timer.sid, isPrivate: timer.isPrivate, epId: timer.epId },

@@ -1,6 +1,8 @@
 // 模型 Provider：统一模型请求（超时 / 重试 / 用量上报 / use 级 request 覆盖）
 import Config from "../config/config";
 import { logger } from "../logger";
+import { QuotaManager } from "../quota/manager";
+import type { QuotaIdentity, QuotaPurposeUse, QuotaReserveHandle } from "../quota/types";
 import { TokenCalibration } from "../token_calibration";
 import { UsageManager } from "../usage";
 import { StopError, StopEvent, withTimeout } from "../utils/timeout";
@@ -14,6 +16,15 @@ import { requestOverridesFor } from "./request_rules";
 import { isMediaUse, ModelUse } from "./types";
 
 const MAX_RETRIES = 2;
+
+/**
+ * **仅供单测**：把配额记账包一层，使用例能注入会抛错的实测桩，
+ * 验证「记账抛错不会导致已成功的请求被重试」（AC-16）。
+ * 生产路径等价于直接调用 `QuotaManager.record`。
+ */
+export const __testHooks = {
+    record: (use: string, totalTokens: number, identity?: QuotaIdentity) => QuotaManager.record(use, totalTokens, identity),
+};
 
 export interface RequestModelOptions {
     /** 服务商标识（vendor）：用于错误分类与厂商特例 */
@@ -42,6 +53,13 @@ export interface RequestModelOptions {
     authToken?: string;
     /** 令牌缓存作用域（默认用连接标识；媒体路径传连接序号，避免不同连接互相覆盖） */
     authTokenScope?: string;
+    /**
+     * 本请求的**预留估算**（chat 细闸用；未给时按用途路径由 `rawEstimateTokens` 推导）。
+     * 只用于 `admitChat` 的预留量，不影响真实记账（记账一律用响应里的 usage）。
+     */
+    quotaEst?: number;
+    /** 配额归属（会话/用户）；缺省时只记「总量」维度（外部 API 路径） */
+    quotaIdentity?: QuotaIdentity;
 }
 
 /** request 覆盖（由「模型规则」[request] 模板解析而来，默认无） */
@@ -115,42 +133,88 @@ export async function requestModel(url: string, apiKey: string, body: any, optio
             `暂不支持协议 "openai-responses"（连接 ${provider || '(未知)'}）；请改用 openai-completions 或 anthropic-messages`, '');
     }
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            const data = await withTimeout(
-                () => fetchProvider(provider, api, url, apiKey, body, overrides ?? undefined, options.dataType),
-                timeoutMs,
-                { stopEvent },
+    // 用量限制细闸：**必须在重试循环外只过一次**（否则 3 次重试各预留一次 ⇒ 额度被重复占用）。
+    // 媒体用途不判不记（需求 D12）；预留句柄在 finally 统一释放，record 按真实 usage 入账。
+    // 拒绝时 QuotaExceededError 直接从本函数抛出（不继承 ApiError ⇒ 上方调用链必须显式穿透）。
+    let quotaHandle: QuotaReserveHandle | null = null;
+    if (countUsage) {
+        const purpose = purposeOf(use);
+        if (purpose) {
+            QuotaManager.admitPurpose(purpose, QuotaManager.estimatePurpose(purpose, options.rawEstimateTokens || 0));
+        } else {
+            quotaHandle = QuotaManager.admitChat(
+                options.quotaIdentity || {},
+                options.quotaEst !== undefined && options.quotaEst > 0
+                    ? options.quotaEst
+                    : QuotaManager.estimateChat(options.modelName || '', options.rawEstimateTokens || 0),
             );
-            if (countUsage) {
-                const usage = extractUsage(data);
-                if (usage) {
-                    // 同时按「模型」与「用途」记账（用途用于区分 chat/摘要/归档/评分各花了多少）
-                    UsageManager.updateUsage(data.model || '', usage, options.use);
-                    TokenCalibration.record(options.modelName || data.model || '', options.rawEstimateTokens || 0, usage.prompt_tokens);
-                }
-            }
-            return data;
-        } catch (e) {
-            // 会话已停止：直接中止，不再重试，也不把 StopError 当成请求失败记录
-            if (e instanceof StopError) throw e;
-            const apiErr: ApiError = e instanceof ApiError
-                ? e
-                : new ApiError(0, provider, classifyApiError(provider, 0, e instanceof Error ? e.message : String(e)), e instanceof Error ? e.message : String(e), '');
-            // 普通 Error 上标注的「不可重试」要带到 ApiError 上，否则下面的退避重试仍会白跑
-            if ((e as any)?.noRetry === true) (apiErr as any).noRetry = true;
-            if (options.modelName) apiErr.modelName = options.modelName;
-            lastError = apiErr;
-            if (!isRetryableApiError(apiErr)) break;
-            if (attempt < MAX_RETRIES) {
-                if (stopEvent && stopEvent.fired) throw new StopError();
-                const delay = apiErr.retryAfterMs ?? 500 * Math.pow(2, attempt);
-                logger.warning(`模型请求失败(${apiErr.kind}, ${apiErr.status || '网络'}): ${apiErr.message}，${delay}ms 后进行第 ${attempt + 1} 次重试`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
         }
     }
-    throw lastError;
+
+    try {
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                const data = await withTimeout(
+                    () => fetchProvider(provider, api, url, apiKey, body, overrides ?? undefined, options.dataType),
+                    timeoutMs,
+                    { stopEvent },
+                );
+                if (countUsage) {
+                    const usage = extractUsage(data);
+                    if (usage) {
+                        // 同时按「模型」与「用途」记账（用途用于区分 chat/摘要/归档/评分各花了多少）
+                        UsageManager.updateUsage(data.model || '', usage, options.use);
+                        TokenCalibration.record(options.modelName || data.model || '', options.rawEstimateTokens || 0, usage.prompt_tokens);
+                        // 用量限制记账：**请求已成功，记账异常绝不能冒泡**，否则会被下面的 catch 归成 ApiError 并重试
+                        // ——那就是对已成功的请求二次计费（AC-16：fetch 必须只被调用 1 次）
+                        try {
+                            __testHooks.record(
+                                use || 'chat',
+                                (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+                                options.quotaIdentity || {},
+                            );
+                        } catch (error) {
+                            logger.warning(`配额记账异常（已忽略，不重试）：${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    }
+                }
+                return data;
+            } catch (e) {
+                // 会话已停止：直接中止，不再重试，也不把 StopError 当成请求失败记录
+                if (e instanceof StopError) throw e;
+                const apiErr: ApiError = e instanceof ApiError
+                    ? e
+                    : new ApiError(0, provider, classifyApiError(provider, 0, e instanceof Error ? e.message : String(e)), e instanceof Error ? e.message : String(e), '');
+                // 普通 Error 上标注的「不可重试」要带到 ApiError 上，否则下面的退避重试仍会白跑
+                if ((e as any)?.noRetry === true) (apiErr as any).noRetry = true;
+                if (options.modelName) apiErr.modelName = options.modelName;
+                lastError = apiErr;
+                if (!isRetryableApiError(apiErr)) break;
+                if (attempt < MAX_RETRIES) {
+                    if (stopEvent && stopEvent.fired) throw new StopError();
+                    const delay = apiErr.retryAfterMs ?? 500 * Math.pow(2, attempt);
+                    logger.warning(`模型请求失败(${apiErr.kind}, ${apiErr.status || '网络'}): ${apiErr.message}，${delay}ms 后进行第 ${attempt + 1} 次重试`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+        throw lastError;
+    } finally {
+        quotaHandle?.release();
+    }
+}
+
+/** ModelUse → 配额用途维度（chat 走预留式细闸，见 requestModel；媒体用途返回 null 不判） */
+function purposeOf(use?: ModelUse): QuotaPurposeUse | null {
+    switch (use) {
+        case 'summarization':
+        case 'judge':
+        case 'image-understanding':
+        case 'text-embedding':
+            return use;
+        default:
+            return null;
+    }
 }
 
 /**

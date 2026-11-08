@@ -657,6 +657,42 @@ tests['subagent.service.noticeLifecycleSweepAndReload'] = async () => {
     void store;
 };
 
+// ---------- 配额归属：子代理归根会话 ----------
+tests['subagent.quota.rootSession'] = () => {
+    // 主会话委派出的 child：归属根会话 + 空发起者（发起者由 runHeadlessActivation 补）
+    const direct = createChildSession({
+        sessionId: 'sub:QQ-Group:1:1',
+        parentSessionId: 'QQ-Group:1',
+        isPrivate: false,
+        depth: 1,
+        treeRootSessionId: 'QQ-Group:1',
+    });
+    assert.equal(direct.quotaSessionId, 'QQ-Group:1');
+
+    // 嵌套委派：孙代理继承同一个根，不会各占一份额度
+    const nested = createChildSession({
+        sessionId: 'sub:sub:QQ-Group:1:1:1',
+        parentSessionId: 'sub:QQ-Group:1:1',
+        isPrivate: false,
+        depth: 2,
+        treeRootSessionId: 'QQ-Group:1',
+    });
+    assert.equal(nested.quotaSessionId, 'QQ-Group:1', '嵌套委派必须归同一根会话');
+
+    // 缺省 treeRootSessionId：退化为父会话（旧调用方零改动）
+    const legacyChild = createChildSession({
+        sessionId: 'sub:QQ-Group:2:1',
+        parentSessionId: 'QQ-Group:2',
+        isPrivate: false,
+        depth: 1,
+    });
+    assert.equal(legacyChild.quotaSessionId, 'QQ-Group:2');
+
+    // 契约：identity 的 sessionId 一定有值，userId 允许为空
+    assert.equal(direct.quotaIdentity().sessionId, 'QQ-Group:1');
+    assert.equal(direct.quotaIdentity().userId, '');
+};
+
 
 
 

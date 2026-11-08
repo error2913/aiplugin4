@@ -8,6 +8,7 @@ import Logger from '../logger';
 import type { ApiError } from '../model/api_error';
 import Model from '../model/model';
 import type { ChatModelUse } from '../model/types';
+import { QuotaExceededError } from '../quota/types';
 import { Session } from '../session/session';
 import { ToolRunner } from '../tool/runner';
 import Tool from '../tool/tool';
@@ -33,6 +34,8 @@ export interface NewChildSessionOptions {
     isPrivate: boolean;
     depth: number;
     agentName?: string;
+    /** 整棵委派树的根会话 id（配额归属；缺省退化为 parentSessionId） */
+    treeRootSessionId?: string;
     /** 父会话当前 toolState 快照（全量继承底）；缺省则由 toolState getter 按配置默认 */
     toolStateSnapshot?: Record<string, boolean>;
     toolFilter?: ToolFilter | null;
@@ -83,6 +86,9 @@ export function createChildSession(o: NewChildSessionOptions): Session {
     session.headless = true;
     session.parentSessionId = o.parentSessionId;
     session.subagentDepth = o.depth;
+    // 配额归属：整棵委派树都记到根会话（否则子代理等于一块免费额度，可通过委派绕过会话限额）
+    session.quotaSessionId = o.treeRootSessionId || o.parentSessionId;
+    session.quotaUserId = '';
     if (o.toolStateSnapshot) session.tool.state = { ...o.toolStateSnapshot };
     session.toolRestriction = o.toolFilter ?? null;
     return session;
@@ -176,6 +182,9 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
 
     child.resetState();
     child.stopEvent.fired = false;
+    // 配额归属：createChildSession 已按根会话预置；这里补触发者（会话级归属保持不变）
+    child.quotaSessionId = child.quotaSessionId || child.parentSessionId;
+    child.quotaUserId = ctx.player?.userId || '';
 
     // 子代理独立上下文：本地消息叠加 + 超上限自动压缩（不接主 ContextStore）
     const context = new SubAgentContext({
@@ -216,11 +225,19 @@ export async function runHeadlessActivation(inp: ActivationInput): Promise<SubAg
             const send = inp.request;
             const turn = send
                 ? await send(messages, tools, 'auto', runId, model, child.stopEvent)
-                : await streamService.sendChatRequest(messages, tools, 'auto', runId, model as never, child.stopEvent, { throwClassified: true, stream: false });
+                : await streamService.sendChatRequest(messages, tools, 'auto', runId, model as never, child.stopEvent, {
+                    throwClassified: true,
+                    stream: false,
+                    quota: { identity: child.quotaIdentity() },
+                });
             raw = turn as { content: string; tool_calls?: unknown[]; reasoning_content?: string };
         } catch (e) {
             if (isStopped(child) || e instanceof StopError) {
                 return { stopReason: 'aborted', output: partial, diagnostic: 'interrupted by ancestor' };
+            }
+            // 配额拒绝：子代理立即以可读原因终止，不记 error（父侧据此降级）
+            if (e instanceof QuotaExceededError) {
+                return { stopReason: 'error', output: partial, diagnostic: `quota: ${e.denial.window}/${e.denial.dimension}` };
             }
             const diag = e instanceof Error && 'kind' in (e as ApiError) ? `kind=${(e as ApiError).kind}` : '';
             return { stopReason: 'error', output: partial, diagnostic: `${diag} ${errorText(e)}`.trim() };

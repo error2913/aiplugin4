@@ -11,6 +11,7 @@ import KnowledgeBaseConfig from "./configs/knowledge_base";
 import McpConfig from "./configs/mcp";
 import MemoryConfig from "./configs/memory";
 import ModelConfig from "./configs/model";
+import QuotaConfig from "./configs/quota";
 import ReceivedConfig from "./configs/received";
 import ReplyConfig from "./configs/reply";
 import ResourceConfig from "./configs/resource";
@@ -31,6 +32,7 @@ export { getRegexConfig } from "./regex";
 const configMap = {
     base: BaseConfig,
     model: ModelConfig,
+    quota: QuotaConfig,
     role: RoleConfig,
     context: ContextConfig,
     received: ReceivedConfig,

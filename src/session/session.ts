@@ -12,6 +12,8 @@ import { logger } from "../logger";
 import SessionMemoryState from "../memory/session_state";
 import { isAnthropicMessages } from "../model/api_dialect";
 import Model from "../model/model";
+import { QuotaManager } from "../quota/manager";
+import type { QuotaIdentity } from "../quota/types";
 import type Image from "../resource/image";
 import { TimerManager } from "../timer";
 import { toolMap } from "../tool/registry";
@@ -43,8 +45,9 @@ const log = logger.withTag('session');
  * - deferred：会话忙/未真正起轮（已退还令牌；调用方可挂起后重试）
  * - bucket-empty：令牌桶空，未起轮（不扣桶、不记账）
  * - gated：aiEnabled=false 且调用方未 bypassGate（外部 API/送达可显式 bypass）
+ * - quota：用量限制拒绝（未写 system 提示、未扣桶、未起轮；用户提示已由 QuotaManager.notifyOnce 节流后发出）
  */
-export type ChatOutcome = 'fired' | 'deferred' | 'bucket-empty' | 'gated';
+export type ChatOutcome = 'fired' | 'deferred' | 'bucket-empty' | 'gated' | 'quota';
 
 // 兼容旧引用：这些符号从 session.ts 拆到叶子模块后仍可继续从本文件 import（内部实现请直接引用叶子）
 export { Setting } from "./setting";
@@ -158,6 +161,13 @@ export class Session {
     parentSessionId = '';
     /** 运行时字段（子代理）：委派深度（主会话=0，逐层+1；不持久化） */
     subagentDepth = 0;
+    /**
+     * 运行时字段：本轮对话的**配额归属会话**（用量限制记账用；子代理指向整棵委派树的根会话；不持久化）。
+     * 空 = 尚未设置，`quotaIdentity()` 回退到 `sessionId`。
+     */
+    quotaSessionId = '';
+    /** 运行时字段：本轮对话的**配额触发者**（定时器/事件等合成轮次为空 ⇒ 只记会话与总量；不持久化） */
+    quotaUserId = '';
     /**
      * 运行时字段：后台完成通知队列，每轮请求前 flush（不持久化）。
      * `kind` 区分来源：缺省/'subagent' = 子代理结算；'media' = 媒体生成任务完成。
@@ -479,16 +489,39 @@ export class Session {
         return this.bucket.count > 0;
     }
 
+    /** 配额身份：会话 id 必填、触发者 id 可为空（子代理指向根会话 + 发起者） */
+    quotaIdentity(): QuotaIdentity {
+        return { sessionId: this.quotaSessionId || this.sessionId, userId: this.quotaUserId };
+    }
+
     async chat(ctx: seal.MsgContext, msg: seal.Message, reason: string = '', tool_choice?: string, options: { skipBucket?: boolean; bypassGate?: boolean } = {}): Promise<ChatOutcome> {
         this.lastCtx = ctx;
         // 冷热状态的"相关活动"：任何一次起一轮对话（@/触发命中/结果送达/定时任务）都算，普通消息入库不算
         this.lastRelevantAt = Date.now();
+        // 配额归属：私聊 sid==uid；群聊取触发者（合成轮次无触发者 ⇒ 只记会话与总量）。
+        // 子代理（headless）的归属由 createChildSession / runHeadlessActivation 预置为**根会话 + 发起者**，
+        // 这里不能覆盖，否则委派会被拆成独立额度、可通过子代理绕过会话限额。
+        this.quotaSessionId = this.quotaSessionId || this.sessionId;
+        if (!this.headless) {
+            this.quotaUserId = this.sessionType === 'user' ? this.sessionId : (ctx.player?.userId || '');
+        }
         log.info('trigger reply:', reason || 'unknown');
 
         // C6：绝对闸（外部 API/结果送达可显式 bypassGate）。会话忙/未真正起轮由 started 判定并退还令牌。
         if (!options.bypassGate && !this.setting.enabled()) {
             log.info('ai disabled, skip reply:', reason || 'unknown');
             return 'gated';
+        }
+
+        // 用量限制粗筛（无 est）：三窗口/会话/个人任一已达上限即拒。免费——不迁移、不扣桶、不清工具态。
+        // bypassGate 不绕过配额：配额是资源上限，不是会话开关（外部 API 同样受限）。
+        const quotaDenial = QuotaManager.checkChat(this.quotaIdentity());
+        if (quotaDenial) {
+            log.info(`quota denied: ${quotaDenial.window}/${quotaDenial.dimension} used=${quotaDenial.used} limit=${quotaDenial.limit}`);
+            if (QuotaManager.notifyOnce(this.sessionId, quotaDenial)) {
+                seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(quotaDenial));
+            }
+            return 'quota';
         }
 
         // 4.14.0：首次对话时把历史 <|...|> 渲染标签迁移为新格式 [xxx]（幂等，后续对话无旧标签可迁）
@@ -586,8 +619,10 @@ export class Session {
         if (id) {
             log.info('end stream:', id);
             if (reply && toolCallStatus) log.warning('unfinished tool call:', reply);
-            await streamService.endStream(id);
+            await streamService.endStream(id, this.quotaIdentity());
         }
+        // 兜底：清理超 TTL 未结算的流（进程被 stop / 后端异常导致 endStream 未被调用）
+        streamService.sweepStaleStreams();
     }
 
     /** 完全停止本会话对话：结束流式输出、升级 stopVersion 中止运行中循环、清理该会话排队请求、清待触发计时器；

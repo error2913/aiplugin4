@@ -8,7 +8,9 @@
 //
 // 解析规则（`resolveCmdChain`）：
 // 1. 第 0 段按命令表归一；
-// 2. 命令是 `trg` 时，第 1 段按触发模式表归一（`p` → `prob`）；其余命令的第 1 段按动词表；
+// 2. 命令是 `trg` 时，第 1 段按触发模式表归一（`p` → `prob`）；
+//    其余命令的第 1 段按 `aliasToCmd`（命令表 ?? 动词表 ?? 原值）归一——命令表对这一段是必需的：
+//    `tk lst` 的 `tk` 是子命令名而不是动词，只用动词表会解析失败（4.30.0 回归）；
 // 3. 更深的段一律按动词表归一（`rule lst` → `rule list`）。
 // 这样 `p` 在 `.ai trg p` 是 probability、在 `.ai memo p` 仍是旧的 private 语义，互不影响。
 
@@ -73,14 +75,21 @@ export function aliasToCmd(val: string): string {
 /**
  * 整条命令链按用途域归一（权限校验用）：
  * `['trg','p','on'] → ['trg','prob','on']`；`['memo','mm','lst'] → ['memory','mm','list']`。
+ *
+ * 第 1 段既可能是**子命令名**（`tk`→`token`、`memo`→`memory`、`md`→`model`…），也可能是动词别名。
+ * `aliasToCmd`（命令表 ?? 动词表 ?? 原值）是动词表解析的超集 ⇒ 对第 1 段用它纯属增量：
+ * 4.30.0 只对 parts[0] 用命令表，导致 `.ai tk lst` / `.ai memo lst` / `.ai md list` 等 9 个
+ * 短别名在权限链里保持原值 → 按「命令不存在」被拒绝（`root_cmd` 的 `aliasToCmd` 派发是好的，
+ * 所以表现为「派发得到但权限不过」）。`trg` 后的第 1 段是模式名（`p`→`prob`），不能走命令表。
  */
 export function resolveCmdChain(parts: readonly string[]): string[] {
     if (parts.length === 0) return [];
     const head = aliasToCmd(String(parts[0]));
     const out: string[] = [head];
     for (let i = 1; i < parts.length; i++) {
+        const raw = String(parts[i]);
         const scope: AliasScope = head === 'trg' && i === 1 ? 'trigger-mode' : 'verb';
-        out.push(applyAlias(String(parts[i]), scope));
+        out.push(i === 1 && head !== 'trg' ? aliasToCmd(raw) : applyAlias(raw, scope));
     }
     return out;
 }

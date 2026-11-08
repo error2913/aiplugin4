@@ -16,6 +16,7 @@ import {
 } from "../event/trigger";
 import { logger } from "../logger";
 import { eventTriggerInstruction } from "../prompt/texts/en";
+import { QuotaManager } from "../quota/manager";
 import type { Session } from "../session/session";
 import { getSession } from "../session/session_service";
 import { SYSTEM_NAME } from "../utils/protocol";
@@ -97,6 +98,12 @@ export async function maybeTriggerEvent(view: EventView, dedupKey: string, optio
 
         // 空闲：poke 路径先把 poke 内容部分正常入库（notice/request 已录制，无需重复写）。
         if (options.messageArray) await session.handleReceipt(ctx, msg, options.messageArray);
+        // 用量限制：先判配额再写提示，避免「事件提示已入库但起不了轮」污染上下文。
+        // 事件已按 markEventTriggered 去重，这里返回 true（已消费，重试无意义），但不写提示、不起轮、不提示用户。
+        if (QuotaManager.checkChat({ sessionId: session.sessionId, userId: view.userId || '' })) {
+            log.info(`事件触发跳过（用量限制）：${view.eventType} sid=${view.sid}`);
+            return true;
+        }
         await session.context.addSystemUserMessage(text, SYSTEM_NAME.eventTrigger, {
             eventType: view.eventType,
             ...(view.source === 'poke' && view.raw !== undefined ? { raw: view.raw } : {}),

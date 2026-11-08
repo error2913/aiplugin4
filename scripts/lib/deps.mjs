@@ -124,6 +124,8 @@ const LAYER_RULES = [
     // 触发域纯能力层（trigger_meta/types/rule/eval/pending/store），只读 utils/config 能力，不摸 session/timer
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/trigger\//.test(f) },
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/(usage|block|timer)\.ts$/.test(f) },
+    // 用量限制（配额）内核：只读 logger/host/utils/token_calibration，不摸 model/session
+    { layer: 2, name: 'L2 能力', test: (f) => /^src\/quota\//.test(f) },
     { layer: 3, name: 'L3 领域', test: (f) => /^src\/(context|session|prompt|tool|agent|subagent)\//.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/(index|pipeline|trigger|changelog)\.ts$/.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/cmd\//.test(f) },

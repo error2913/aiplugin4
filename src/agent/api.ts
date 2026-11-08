@@ -83,9 +83,12 @@ export function registerAgentApi(): void {
         Agent,
         getAgent: (name?: string) => Agent.get(name || '*'),
         getSession: (agentName: string, sessionId: string) => Agent.get(agentName).sessionService.getSession(sessionId),
+        // 用量限制：外部 API 不传配额身份 ⇒ 只计入「总量」维度（不占任何会话/个人额度，见需求 §9.4）；
+        // 三窗口总量上限依然生效（在 requestModel 细闸里抛 QuotaExceededError）
         chat: async (prompt: string, agentName?: string, options?: { allowImages?: boolean }) =>
             Agent.get(agentName || '*').chat(prompt, { allowImages: options?.allowImages === true }),
-        chatMessages: async (messages: { role: string, content: string }[], agentName?: string, options?: { allowImages?: boolean }) =>
+        /** 同上：只记总量、不占会话/个人额度 */
+        chatMessages: async (messages: { role: string; content: string }[], agentName?: string, options?: { allowImages?: boolean }) =>
             Agent.get(agentName || '*').chatMessages(messages, { allowImages: options?.allowImages === true }),
         imageToText: async (source: string, prompt?: string) => {
             if (!Model.getMultimodalModel('image-understanding')) return '未找到支持 image-understanding 的多模态模型';
@@ -110,7 +113,8 @@ export function registerAgentApi(): void {
             const agent = Agent.get(options.agentName || '*');
             const sessionId = ctx.isPrivate ? ctx.player!.userId : ctx.group!.groupId;
             const session = agent.sessionService.getSession(sessionId);
-            // 外部插件 API 不受会话 AI 总闸影响（作者 Q8：外部不受控）
+            // 外部插件 API 不受会话 AI 总闸影响（作者 Q8：外部不受控）。
+            // 注意 `bypassGate` **不绕过用量限制**：配额是资源上限而非会话开关，此处按会话维度照常判定。
             await session.chat(ctx, msg, options.reason || '外部插件调用', options.toolChoice, { bypassGate: true });
         },
         registerTool: (info: ToolInfo, options: RegisterToolOptions = {}) => {

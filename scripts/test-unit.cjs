@@ -58,6 +58,8 @@ const bundles = {
     judgeConfig: path.join(outDir, 'unit-judge-config.cjs'),
     triggerTools: path.join(outDir, 'unit-trigger-tools.cjs'),
     tokenSelect: path.join(outDir, 'unit-token-select.cjs'),
+    quota: path.join(outDir, 'unit-quota.cjs'),
+    quotaRequest: path.join(outDir, 'unit-quota-request.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -111,7 +113,9 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['triggerChain', path.join(repo, 'scripts/unit-test-trigger-chain.ts')],
         ['judgeConfig', path.join(repo, 'scripts/unit-test-judge-config.ts')],
         ['triggerTools', path.join(repo, 'scripts/unit-test-trigger-tools.ts')],
-        ['tokenSelect', path.join(repo, 'scripts/unit-test-token-select.ts')]
+        ['tokenSelect', path.join(repo, 'scripts/unit-test-token-select.ts')],
+        ['quota', path.join(repo, 'scripts/unit-test-quota.ts')],
+        ['quotaRequest', path.join(repo, 'scripts/unit-test-quota-request.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

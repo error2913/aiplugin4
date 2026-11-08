@@ -3,6 +3,8 @@
 // 与聊天模型共用 requestModel 的超时/重试/错误分类/用量上报；区别只有 URL 与 body：
 //   { model, state, questions } → { answers, usage }。
 // 由 agent 层实现 AuxLlm.systemOne 时调用；judge 只依赖 L0 端口。
+import { estimateTextTokens } from '../utils/token_estimate';
+
 import type { ModelEntry } from './entry';
 import { requestModel } from './provider';
 
@@ -29,6 +31,8 @@ export async function requestSystemOne(
             api: 'openai-completions',
             modelName: model.name,
             use: 'judge',
+            // 用途准入的估算依据：没有原始估算时，「用途限流」会退化成只判已用量（永远放行）
+            rawEstimateTokens: estimateTextTokens(JSON.stringify(state ?? {})) + estimateTextTokens(JSON.stringify(questions ?? {})),
         },
     );
 }

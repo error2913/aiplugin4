@@ -43,6 +43,8 @@ function buildRequest(ctx: seal.MsgContext, msg: seal.Message, session: Session,
             epId: ctx.endPoint.userId,
             isPrivate: ctx.isPrivate,
             depth: session.subagentDepth,
+            // 整棵委派树的根会话：主会话=自己；子代理再委派时继承父的根（配额归属用）
+            treeRootSessionId: session.quotaSessionId || session.sessionId,
         },
         persona: args.persona && args.persona !== '' ? args.persona : DEFAULT_PERSONA,
         // 深度：主会话按配置；child 默认不可再委派（放开需补根归属透传）

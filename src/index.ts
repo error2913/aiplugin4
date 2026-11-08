@@ -27,6 +27,7 @@ import { reconcileRuleTimers } from "./pipeline/trigger_timer_impl";
 import { installPromptMemorySource } from "./prompt/memory_source_impl";
 import { registerBuiltinSections } from "./prompt/sections";
 import { registerJudgePromptTextsImpl } from "./prompt/texts/en";
+import { QuotaManager } from "./quota/manager";
 import { ImageGC } from "./resource/image_gc";
 import { TimerManager } from "./timer";
 import { registerAllTools } from "./tool/bootstrap";
@@ -54,6 +55,9 @@ function main() {
   installAuxLlm();
   installPromptMemorySource();
   Config.registerConfig();
+  // 用量限制内核的配置读取器：必须在 registerConfig 之后（QuotaConfig 键已注册），
+  // 且早于任何起轮路径（第一条消息可能随时到达）。`Config.quota` 是已解析视图（内含 60s TTL 缓存）。
+  QuotaManager.configure(() => Config.quota);
   // 上下文「归档保留原文」开关：装配层注入（context 层不 import config，避免跨层依赖）
   ContextService.configureArchivedRetention(() => Config.context.KEEP_ARCHIVED_RAW);
   initAgents();

@@ -13,6 +13,8 @@ import { ChatModelUse } from "../model/types";
 import { getProbedContextWindow, rememberProbedContextWindow } from "../model/window_cache";
 import { buildPromptParts, promptPartsToSystemMessage } from "../prompt/builder";
 import type { PromptParts } from "../prompt/types";
+import { QuotaManager } from "../quota/manager";
+import { QuotaExceededError } from "../quota/types";
 import Image from "../resource/image";
 import { locateRejectedImageRefs } from "../resource/image_model_source";
 import { Session } from "../session/session";
@@ -220,6 +222,13 @@ export default class Agent {
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
             if (e instanceof StopError) return started;
+            // 兜底：配额拒绝若从内层未被拦截地冒到这里，也不能变成「指令执行失败」的技术错误
+            if (e instanceof QuotaExceededError) {
+                if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                    seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                }
+                return started;
+            }
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -251,7 +260,8 @@ export default class Agent {
         // 触发闸二次判定（方案 §5.9）：.ai off 期间挂起的 trigger 项只入库、丢弃触发语义；
         // 桶空时也不写 trigger 提示（避免无法兑现的提示残留在上下文）。
         const aiActive = session.setting.enabled();
-        const canWake = aiActive && session.hasBucketToken();
+        // 配额：超限时不写 trigger 提示、不续跑（挂起消息保留，等额度恢复）
+        const canWake = aiActive && session.hasBucketToken() && !QuotaManager.checkChat(session.quotaIdentity());
         const hasTrigger = await session.flushPending({ writeTriggerPrompts: canWake });
         if (hasTrigger && firstTrigger && canWake && session.stopVersion === version && !session.stopEvent.fired) {
             // 重载恢复的挂起消息没有 ctx/msg 运行时对象：按落盘的 epId/isPrivate 重建；失败则跳过续跑（消息已入库不丢）
@@ -321,12 +331,25 @@ export default class Agent {
             try {
                 // throwClassified=true：分类错误（超长/余额不足等）在此上抛，由 handleModelError 自动处理后重发；
                 // 其余调用方不传该选项，维持原有吞错返回空的静默行为
-                const request = streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, { throwClassified: true });
+                const request = streamService.sendChatRequest(messages, toolInfos || [], tool_choice || 'auto', trace.runId, undefined, session.stopEvent, {
+                    throwClassified: true,
+                    quota: {
+                        identity: session.quotaIdentity(),
+                        maxTokens: Number((Model.getBodyDefaultsFor('chat') as any)?.max_tokens) || 0,
+                    },
+                });
                 // 主对话请求已发出：并发启动总结（按切后 T 决定范围，不阻塞回复）
                 archive?.afterRequestSent();
                 turn = await request;
             } catch (e) {
                 if (e instanceof StopError) return;
+                // 用量限制：不重试、不切模型，直接结束本轮（提示只发一次，经 notifyOnce 节流）
+                if (e instanceof QuotaExceededError) {
+                    if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                        seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                    }
+                    return;
+                }
                 if (!(e instanceof ApiError)) throw e;
                 const action = await this.handleModelError(ctx, session, e, handled, collectImageUrls(messages), imageTrace);
                 if (action !== 'retry') return;
@@ -632,6 +655,13 @@ export default class Agent {
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
             if (e instanceof StopError) return started;
+            // 兜底：配额拒绝不得冒到 root_cmd 的通用 catch（会显示「指令执行失败」）
+            if (e instanceof QuotaExceededError) {
+                if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                    seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                }
+                return started;
+            }
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -699,7 +729,10 @@ export default class Agent {
                     archiveHooks: archive ? { beforeCompile: info => archive.beforeRequest(info) } : undefined,
                 });
                 requestImages = collectImageUrls(messages);
-                const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, { throwClassified: true });
+                const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, {
+                    throwClassified: true,
+                    quota: { identity: session.quotaIdentity() },
+                });
                 if (!newId) return;
                 // 流式请求已建立：并发启动总结（不阻塞后续轮询）
                 archive?.afterRequestSent();
@@ -713,6 +746,13 @@ export default class Agent {
                 break;
             } catch (e) {
                 if (e instanceof StopError) return;
+                // 用量限制：流式起流被拒 ⇒ 直接结束本轮（不重试、不切模型）
+                if (e instanceof QuotaExceededError) {
+                    if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                        seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                    }
+                    return;
+                }
                 if (!(e instanceof ApiError)) {
                     log.exception('runStreamInner startStream', e);
                     return;

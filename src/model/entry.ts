@@ -2,6 +2,8 @@
 // 从 model.ts 拆出——模型注册表（Model 静态）与实例能力（ModelEntry）解耦；
 // model.ts 保留 re-export，外部 import 零改动。
 import Logger from "../logger";
+import { QuotaExceededError } from "../quota/types";
+import { estimateTextTokens } from "../utils/token_estimate";
 
 import { buildProviderBody, parseProviderResponse } from "./adapter";
 import { isAnthropicMessages } from "./api_dialect";
@@ -209,6 +211,8 @@ export class ModelEntry {
                 provider: this.provider,
                 use: 'text-embedding',
                 modelName: this.name,
+                // 用途准入的估算依据（缺省时「用途限流」退化为只判已用，永远放行）
+                rawEstimateTokens: estimateTextTokens(text),
             });
             if (data.data && data.data.length > 0) {
                 const embedding = data.data[0].embedding;
@@ -223,6 +227,11 @@ export class ModelEntry {
             }
             throw new Error(`服务器响应中没有data或data为空\n响应体:${JSON.stringify(data, null, 2)}`);
         } catch (e) {
+            // 用途被拒是预期内降级（嵌入→关键词检索），不该刷 error 日志
+            if (e instanceof QuotaExceededError) {
+                log.debug(`嵌入跳过（用量限制 ${e.denial.window}/${e.denial.dimension}）`);
+                return [];
+            }
             log.error(`在调用嵌入模型${this.name}中出错:`, e instanceof Error ? e.message : String(e));
             return [];
         }
@@ -249,6 +258,8 @@ export class ModelEntry {
                 api: this.api,
                 use: 'image-understanding',
                 modelName: this.name,
+                // 图片有固定视觉开销（与 checkRequestBudget 多模态口径一致：文本 + 1024）
+                rawEstimateTokens: estimateTextTokens(prompt) + 1024,
             });
             const response = parseProviderResponse(this.provider, data, this.api);
             if (response.choices && response.choices.length > 0) {
@@ -259,6 +270,11 @@ export class ModelEntry {
             }
             throw new Error(`服务器响应中没有choices或choices为空\n响应体:${JSON.stringify(data, null, 2)}`);
         } catch (e) {
+            // 用途被拒是预期内降级（识图→图片按文本标签），不刷 error 日志
+            if (e instanceof QuotaExceededError) {
+                log.debug(`识图跳过（用量限制 ${e.denial.window}/${e.denial.dimension}）`);
+                return '';
+            }
             log.exception('在调用识图模型' + this.name + '中出错', e);
             return '';
         }

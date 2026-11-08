@@ -150,6 +150,8 @@ function makeExecutor(fork: boolean, opt: SubAgentWireOptions): SubAgentExecutor
                 isPrivate: req.parent.isPrivate,
                 depth: req.parent.depth + 1,
                 agentName: req.persona ?? '',
+                // 嵌套委派：继承父的根会话，保证整棵树共用一份会话额度
+                treeRootSessionId: req.parent.treeRootSessionId ?? req.parent.sessionId,
                 toolStateSnapshot: rt.parentSession.toolState,
                 toolFilter: req.toolFilter ?? null,
             });
