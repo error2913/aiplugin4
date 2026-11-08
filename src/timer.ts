@@ -9,6 +9,7 @@ import {
 } from "./core/ports/trigger_timer";
 import type { RuleTimerSpec, RuleTimerTarget } from "./core/ports/trigger_timer";
 import { logger } from "./logger";
+import { QuotaManager } from "./quota/manager";
 import type { Session } from "./session/session";
 import { wakeSession } from "./trigger/wake";
 import { SYSTEM_NAME } from "./utils/protocol";
@@ -418,6 +419,10 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             // A12：合成 msg 无 rawId，回填同端点最近真实用户消息，开启「回复引用」时也能带 [CQ:reply]
                             applyLastMessageRef(session, ctx, msg);
 
+                            // 用量限制：定时任务无触发者 ⇒ 只受会话/总量限制；超限则本轮静默跳过（不写提示、不起轮）。
+                            // 一次性定时器此时尚未 removeTimer ⇒ 下一轮 tick 会重试（被限流不应消耗定时器）。
+                            if (QuotaManager.checkChat({ sessionId: session.sessionId, userId: '' })) break;
+
                             const s = `Your timer fired. Send this reply:
 Timer set at: ${fmtDate(set)}
 Target time: ${fmtDate(target)}
@@ -448,6 +453,10 @@ Prompt: ${pickPrompt(timer.prompts) || content}`;
                             const { ctx, msg } = getSessionCtxAndMsg(epId, sid, isPrivate);
                             const session = getSessionById(sid);
                             applyLastMessageRef(session, ctx, msg);
+
+                            // 用量限制：定时任务无触发者 ⇒ 只受会话/总量限制；本轮静默跳过（不写提示）。
+                            // 放在「先更新 set/count 并落盘」之前，避免被限流的一次吃掉间隔计数。
+                            if (QuotaManager.checkChat({ sessionId: session.sessionId, userId: '' })) break;
 
                             // 无效次数：不触发，直接移除
                             if (count === 0 || count < -1) {
@@ -520,6 +529,9 @@ Prompt: ${pickPrompt(timer.prompts) || content}`;
                             }
                             // 旧 activeTime 定时器已执行/被新定时器替代，从队列移除并落盘（addActiveTimeTimer 已把新定时器入队并落盘）
                             removeTimer(timer);
+
+                            // 用量限制：重排已完成，这里只跳过提示与起轮（静默，不污染上下文）
+                            if (QuotaManager.checkChat({ sessionId: session.sessionId, userId: '' })) break;
 
                             const messages = session.context.messages;
                             const lastMsg = messages[messages.length - 1] as any;

@@ -13,6 +13,7 @@ import { ChatModelUse } from "../model/types";
 import { getProbedContextWindow, rememberProbedContextWindow } from "../model/window_cache";
 import { buildPromptParts, promptPartsToSystemMessage } from "../prompt/builder";
 import type { PromptParts } from "../prompt/types";
+import { QuotaManager } from "../quota/manager";
 import Image from "../resource/image";
 import { locateRejectedImageRefs } from "../resource/image_model_source";
 import { Session } from "../session/session";
@@ -251,7 +252,8 @@ export default class Agent {
         // 触发闸二次判定（方案 §5.9）：.ai off 期间挂起的 trigger 项只入库、丢弃触发语义；
         // 桶空时也不写 trigger 提示（避免无法兑现的提示残留在上下文）。
         const aiActive = session.setting.enabled();
-        const canWake = aiActive && session.hasBucketToken();
+        // 配额：超限时不写 trigger 提示、不续跑（挂起消息保留，等额度恢复）
+        const canWake = aiActive && session.hasBucketToken() && !QuotaManager.checkChat(session.quotaIdentity());
         const hasTrigger = await session.flushPending({ writeTriggerPrompts: canWake });
         if (hasTrigger && firstTrigger && canWake && session.stopVersion === version && !session.stopEvent.fired) {
             // 重载恢复的挂起消息没有 ctx/msg 运行时对象：按落盘的 epId/isPrivate 重建；失败则跳过续跑（消息已入库不丢）

@@ -7,8 +7,9 @@
 // 方案 §5.7：
 // - 入口已负责入库；本函数只写触发提示，不重复入库；
 // - 起轮前回填 lastMsgRef（A12），保证定时/自主/事件触发的回复也能带 [CQ:reply]；
-// - 返回 ChatOutcome（fired/deferred/bucket-empty/gated），调用方只在 fired 时提交 delta/计数；
+// - 返回 ChatOutcome（fired/deferred/bucket-empty/gated/quota），调用方只在 fired 时提交 delta/计数；
 // - 忙判由消息入口在调 wake 之前完成（方案 A2），本函数不 defer。
+import { QuotaManager } from "../quota/manager";
 import type { ChatOutcome } from "../session/session";
 import { SYSTEM_NAME } from "../utils/protocol";
 import { applyLastMessageRef } from "../utils/seal";
@@ -34,6 +35,10 @@ export interface WakeSessionLike {
     setting?: { enabled(): boolean };
     /** 令牌可用性预判（只回补不扣减）；缺失时不预判（交给 chat） */
     hasBucketToken?(): boolean;
+    /** 会话 id（配额归属；缺失时跳过配额预判） */
+    sessionId?: string;
+    /** 配额身份（优先；缺失时退化为 `{sessionId}`，因为合成轮次无触发者） */
+    quotaIdentity?(): { sessionId?: string; userId?: string };
     context: { addSystemUserMessage(text: string, systemName?: string, extra?: unknown): Promise<void> | void };
     save(force?: boolean): void;
     chat(ctx: seal.MsgContext, msg: seal.Message, reason?: string, toolChoice?: string, options?: { skipBucket?: boolean; bypassGate?: boolean }): Promise<ChatOutcome>;
@@ -53,6 +58,20 @@ export async function wakeSession(session: WakeSessionLike, ctx: seal.MsgContext
     }
     if (session.hasBucketToken && !session.hasBucketToken()) {
         return 'bucket-empty';
+    }
+    // 用量限制：未真正起轮时不写提示（否则限流期间规则/模式 timer 会持续灌"请说话"）
+    const sid = session.sessionId || '';
+    const identity = typeof session.quotaIdentity === 'function'
+        ? session.quotaIdentity()
+        : { sessionId: sid, userId: '' };
+    if (identity.sessionId || sid) {
+        const denial = QuotaManager.checkChat({ sessionId: identity.sessionId || sid, userId: identity.userId || '' });
+        if (denial) {
+            if (QuotaManager.notifyOnce(identity.sessionId || sid, denial)) {
+                seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(denial));
+            }
+            return 'quota';
+        }
     }
     const text = payload.wakeText && payload.wakeText.trim() ? payload.wakeText : '';
     const systemName = payload.systemName || SYSTEM_NAME.triggerRule;

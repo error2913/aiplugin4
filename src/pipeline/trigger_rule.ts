@@ -265,7 +265,8 @@ export async function runChain(input: ChainInput): Promise<ChainResult> {
         }
         const result = await evaluateRule(rule, input);
         if (result.status === 'fired' || result.status === 'suspended' || result.status === 'parked' || result.status === 'detached') return result;
-        if (result.status === 'gated' || result.status === 'deferred' || result.status === 'bucket-empty') return result;
+        // quota：用量限制拒绝（未写提示、未扣桶）——与 gated/deferred/bucket-empty 一样终止链，不再往后匹配规则
+        if (result.status === 'gated' || result.status === 'deferred' || result.status === 'bucket-empty' || result.status === 'quota') return result;
     }
     return { status: 'no-match' };
 }
