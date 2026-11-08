@@ -10,6 +10,8 @@ import { claimTable, messageClaimKey } from '../src/pipeline/claim_table';
 import { getPendingDelays, getRuleStore, resetTriggerRuleStateForTest, runChain } from '../src/pipeline/trigger_rule';
 import { ensureRuleTimersForSession, fireRuleTimer, installTriggerTimerHandler, resetTriggerTimerHandlerForTest } from '../src/pipeline/trigger_timer_impl';
 import { wakeSession } from '../src/pipeline/wake';
+import { QuotaManager } from '../src/quota/manager';
+import { resetStoreCacheForTest } from '../src/quota/store';
 import { validateRule } from '../src/trigger/rule';
 import { Session } from '../src/session/session';
 import { Setting } from '../src/session/setting';
@@ -28,8 +30,14 @@ class MemoryStorage {
     }
 }
 
+const storage = new MemoryStorage();
+const storeMap = storage.map;
+
 setHost({
-    storage: new MemoryStorage(),
+    storage: {
+        get: (key: string) => storage.get(key),
+        set: (key: string, value: string) => storage.set(key, value),
+    },
     clock: { now: () => Date.now() },
     fetch: (() => Promise.reject(new Error('no fetch'))) as never,
     ext: {} as never,
@@ -419,5 +427,151 @@ export const tests = {
         });
         assert.equal(result.status, 'parked');
         assert.equal(result.wakeText, '醒醒');
+    },
+
+    /** C1：quota 结果终止链（不再匹配后续规则），且不记 fired */
+    async testChainQuotaOutcomeStopsChain(): Promise<void> {
+        resetTriggerRuleStateForTest();
+        claimTable.clearAll();
+        seedRule({ scope: { sessions: ['QQ-Group:40'] }, gates: [{ type: 'regex', pattern: '考试' }], wake_prompts: ['醒醒'] });
+        seedRule({ id: 'tr_second', scope: { sessions: ['QQ-Group:40'] }, gates: [{ type: 'regex', pattern: '考试' }], wake_prompts: ['醒醒'] });
+        // 假会话：起轮一律返回 quota（模拟细闸/粗闸拒绝）
+        const session = {
+            sessionId: 'QQ-Group:40',
+            setting: { enabled: () => true },
+            hasBucketToken: () => true,
+            context: { addSystemUserMessage: async () => undefined },
+            save: () => undefined,
+            chat: async () => 'quota' as const,
+        };
+        try {
+            const result = await runChain({
+                session: session as never,
+                ctx: makeCtx('QQ-Group:40'),
+                msg: makeMsg(1),
+                text: '考试啦',
+                now: NOW,
+            });
+            assert.equal(result.status, 'quota', 'quota 必须原样上抛给调用方');
+            const state = getRuleStore().readState('tr_test')['QQ-Group:40'];
+            assert.equal(state?.fired || 0, 0, 'quota 不得记 fired');
+            const second = getRuleStore().readState('tr_second')['QQ-Group:40'];
+            assert.equal(second, undefined, 'quota 必须终止链，不得继续匹配后续规则');
+        } finally {
+            resetTriggerRuleStateForTest();
+        }
+    },
+
+    /**
+     * C1：规则定时器遇 quota 不消费次数
+     * （`advanceTimer(timer, outcome === 'fired')` ⇒ interval 按原 count 重排、target 不补）
+     */
+    async testAdvanceTimerQuotaNotConsumed(): Promise<void> {
+        const g = globalThis as any;
+        const origGetEndPoints = g.seal.getEndPoints;
+        const origCreateTempCtx = g.seal.createTempCtx;
+        const sid = 'QQ-Group:41';
+        g.seal.getEndPoints = () => [{ userId: 'QQ:10000', platform: 'QQ', state: 1 }];
+        g.seal.createTempCtx = (ep: any, msg: any) => ({
+            endPoint: { userId: ep.userId },
+            player: { userId: 'QQ:20000' },
+            isPrivate: msg?.messageType === 'private',
+            group: msg?.groupId ? { groupId: msg.groupId } : null,
+        });
+        setAgentResolver(() => ({
+            sessionService: {
+                getSession: () => ({
+                    sessionId: sid,
+                    lastMsgRef: {},
+                    setting: { enabled: () => true },
+                    hasBucketToken: () => true,
+                    context: { addSystemUserMessage: async () => undefined },
+                    save: () => undefined,
+                    chat: async () => 'quota' as const,
+                }),
+            },
+        }) as any);
+        TimerManager.timerQueue = [];
+        const timer = new TimerInfo();
+        timer.sid = sid;
+        timer.isPrivate = false;
+        timer.epId = 'QQ:10000';
+        timer.ruleId = 'mode:' + sid;
+        timer.modeTag = 'mode';
+        timer.type = 'interval';
+        timer.set = Math.floor(Date.now() / 1000) - 10;
+        timer.interval = 1800;
+        timer.target = Math.floor(Date.now() / 1000) - 5;
+        timer.count = 3;
+        timer.prompts = ['提醒'];
+        TimerManager.timerQueue = [timer];
+        try {
+            await fireRuleTimer(timer);
+            const left = TimerManager.listRuleTimers('mode:' + sid);
+            assert.equal(left.length, 1, 'quota 后 interval 应重排（不消费次数）');
+            assert.equal(left[0].count, 3, 'quota 不得把 count 从 3 减到 2');
+        } finally {
+            g.seal.getEndPoints = origGetEndPoints;
+            g.seal.createTempCtx = origCreateTempCtx;
+            setAgentResolver(null);
+            TimerManager.timerQueue = [];
+        }
+    },
+
+    /** C2：wake 先判配额——超限时不写触发提示、不起轮 */
+    async testWakeNoPromptOnQuota(): Promise<void> {
+        setHost({
+            storage: {
+                get: (key: string) => storeMap.get(key) ?? null,
+                set: (key: string, value: string) => { storeMap.set(key, value); },
+            },
+            clock: { now: () => NOW },
+            fetch: (() => Promise.reject(new Error('no fetch'))) as never,
+            ext: {} as never,
+        });
+        resetStoreCacheForTest();
+        QuotaManager.releaseAllInflightForTest();
+        QuotaManager.clearNotifiedForTest();
+        QuotaManager.configure(() => ({
+            ENABLED: true,
+            LIMIT_5H: 100,
+            LIMIT_WEEK: 0,
+            LIMIT_MONTH: 0,
+            SESSION_PERCENT: 100,
+            USER_PERCENT: 100,
+            PEAK_RULE: { segments: [], warnings: [] },
+            PURPOSE_PERCENT: { summarization: 100, judge: 100, 'image-understanding': 100, 'text-embedding': 100 },
+            NOTIFY_ON_LIMIT: false,
+        }));
+        let prompt = 0;
+        let chat = 0;
+        const session = {
+            sessionId: 'QQ-Group:quota-wake',
+            setting: { enabled: () => true },
+            hasBucketToken: () => true,
+            context: { addSystemUserMessage: async () => { prompt++; } },
+            save: () => undefined,
+            chat: async () => { chat++; return 'fired' as const; },
+        };
+        try {
+            QuotaManager.record('chat', 200, { sessionId: 'QQ-Group:quota-wake', userId: '' });
+            const outcome = await wakeSession(session as never, {} as never, {} as never, { kind: 'rule', wakeText: '提醒' });
+            assert.equal(outcome, 'quota');
+            assert.equal(prompt, 0, 'quota 时不得写触发提示（否则污染上下文且无法兑现）');
+            assert.equal(chat, 0);
+        } finally {
+            QuotaManager.configure(() => ({
+                ENABLED: false,
+                LIMIT_5H: 0,
+                LIMIT_WEEK: 0,
+                LIMIT_MONTH: 0,
+                SESSION_PERCENT: 100,
+                USER_PERCENT: 100,
+                PEAK_RULE: { segments: [], warnings: [] },
+                PURPOSE_PERCENT: { summarization: 100, judge: 100, 'image-understanding': 100, 'text-embedding': 100 },
+                NOTIFY_ON_LIMIT: false,
+            }));
+            QuotaManager.reset();
+        }
     },
 };

@@ -222,6 +222,13 @@ export default class Agent {
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
             if (e instanceof StopError) return started;
+            // 兜底：配额拒绝若从内层未被拦截地冒到这里，也不能变成「指令执行失败」的技术错误
+            if (e instanceof QuotaExceededError) {
+                if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                    seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                }
+                return started;
+            }
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽
@@ -648,6 +655,13 @@ export default class Agent {
         } catch (e) {
             // stop 中断：静默返回，不打印堆栈（finally 仍会释放并发槽/归零计数）
             if (e instanceof StopError) return started;
+            // 兜底：配额拒绝不得冒到 root_cmd 的通用 catch（会显示「指令执行失败」）
+            if (e instanceof QuotaExceededError) {
+                if (QuotaManager.notifyOnce(session.sessionId, e.denial)) {
+                    seal.replyToSender(ctx, msg, QuotaManager.formatDenialText(e.denial));
+                }
+                return started;
+            }
             throw e;
         } finally {
             // 未拿到许可（被 stop 取消/队列满/acquire 异常）时不得释放别人的并发槽

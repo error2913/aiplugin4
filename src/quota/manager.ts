@@ -131,7 +131,7 @@ export class QuotaManager {
         try {
             return getHost().clock.now();
         } catch {
-            return this.nowRaw();
+            return Date.now();
         }
     }
 

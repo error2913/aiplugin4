@@ -87,7 +87,7 @@ import { hasConfigHook, registerConfigHook, runConfigHook } from "../src/config/
 import { isIgnoredConfig } from "../src/model/model";
 import { Session } from "../src/session/session";
 import { activeTimeSegmentIndex, computeSessionState, HOT_HOLD_MS } from "../src/session/rhythm";
-import { serializePendingQueue, serializeSession, shouldDeferCoalescedSave } from "../src/session/persistence";
+import { SESSION_RUNTIME_KEYS, serializePendingQueue, serializeSession, shouldDeferCoalescedSave } from "../src/session/persistence";
 import { JudgeManager } from "../src/judge/judge_manager";
 import { TimerInfo, TimerManager } from "../src/timer";
 import Image from "../src/resource/image";
@@ -2864,6 +2864,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(data.sessionId, 'QQ:persist');
         for (const key of ['running', 'pendingQueue', 'lastCtx', 'stopEvent', 'saveTimer', 'lastRelevantAt']) {
             assert.ok(!(key in data), `运行时字段 ${key} 不应落盘`);
+        }
+        // 配额归属是运行时字段（子代理预置值不能被持久化后串到别的会话）
+        for (const key of ['quotaSessionId', 'quotaUserId']) {
+            assert.ok(SESSION_RUNTIME_KEYS.has(key), `${key} 必须列入 SESSION_RUNTIME_KEYS`);
+            assert.ok(!(key in data), `${key} 是运行时字段，不应落盘`);
         }
         const revived = revive(Session, data) as Session;
         assert.equal(revived.running, false, '重载后 running 归零');

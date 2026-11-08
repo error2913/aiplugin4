@@ -426,4 +426,23 @@ export class streamService {
     static pendingStreamCountForTest(): number {
         return this.streamMeta.size;
     }
+
+    /**
+     * **仅供单测**：直接注入一条流 meta，避免用例真发 HTTP 才能覆盖
+     * 「失败路径释放句柄 / 起流身份优先归因」。
+     */
+    static seedStreamMetaForTest(id: string, meta: {
+        modelName: string;
+        rawEstimate: number;
+        startedAt: number;
+        handle?: QuotaReserveHandle;
+        identity?: QuotaIdentity;
+    }): void {
+        this.streamMeta.set(id, { use: 'chat', ...meta });
+    }
+
+    /** **仅供单测**：清空所有流 meta（用例间隔离） */
+    static resetStreamMetaForTest(): void {
+        this.streamMeta.clear();
+    }
 }
