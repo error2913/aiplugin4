@@ -14,6 +14,7 @@ import { streamService } from '../src/agent/stream';
 import Config from '../src/config/config';
 import type { QuotaConfigView } from '../src/config/configs/quota';
 import { setHost } from '../src/core/host';
+import { ModelEntry } from '../src/model/entry';
 import { __testHooks, requestModel } from '../src/model/provider';
 import { QuotaManager } from '../src/quota/manager';
 import { loadStore, resetStoreCacheForTest } from '../src/quota/store';
@@ -187,8 +188,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /** C6：结算归因优先「起流时刻」身份（长流期间会话再起一轮也不会记错） */
-    async testEndStreamAttributionPrefersMeta(): Promise<void> {
-        setup();
+    async testEndStreamAttributionPrefersMeta(): Promise<void> {        setup();
         streamService.seedStreamMetaForTest('stream-ok', {
             modelName: 'fake-model',
             rawEstimate: 100,
@@ -215,6 +215,29 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(store.sessions['QQ-Group:later'], undefined, '不得记到调用方后来传入的会话');
             assert.equal(store.total.h.v, 140, '总量维度同步累计');
             assert.equal(streamService.pendingStreamCountForTest(), 0, '成功路径也要清理 streamMeta');
+        } finally {
+            fetchStub.restore();
+        }
+    },
+
+    /** AC-09：用途细闸拒绝时嵌入/识图各自按约定降级（不抛、不刷 error） */
+    async testPurposeRejectionDegrades(): Promise<void> {
+        setup();
+        // 用途预算压到 1：先记满，之后任何用途请求都会被拒
+        QuotaManager.configure(() => view({
+            PURPOSE_PERCENT: { summarization: 1, judge: 1, 'image-understanding': 1, 'text-embedding': 1 },
+        }));
+        QuotaManager.record('text-embedding', 1_000_000, {});
+        QuotaManager.record('image-understanding', 1_000_000, {});
+        const fetchStub = stubFetch(async () => okResponse());
+        const model = new ModelEntry(0, 'fake-model', 'test', 'http://upstream.invalid/v1', 'key', ['embed'], 'config');
+        try {
+            const vector = await model.callEmbedding('hello');
+            assert.deepEqual(vector, [], '嵌入被拒应返回空数组（调用方回退关键词检索）');
+            const text = await model.callITT('http://img.invalid/a.png', 'describe');
+            assert.equal(text, '', '识图被拒应返回空串（调用方按文本标签处理）');
+            assert.equal(fetchStub.calls, 0, '被拒时不该真的发出网络请求');
+            assert.equal(QuotaManager.inflightSnapshotForTest().total, 0, '用途路径不预留 inflight');
         } finally {
             fetchStub.restore();
         }
