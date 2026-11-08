@@ -188,7 +188,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /** C6：结算归因优先「起流时刻」身份（长流期间会话再起一轮也不会记错） */
-    async testEndStreamAttributionPrefersMeta(): Promise<void> {        setup();
+    async testEndStreamAttributionPrefersMeta(): Promise<void> {
+        setup();
         streamService.seedStreamMetaForTest('stream-ok', {
             modelName: 'fake-model',
             rawEstimate: 100,
@@ -238,6 +239,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(text, '', '识图被拒应返回空串（调用方按文本标签处理）');
             assert.equal(fetchStub.calls, 0, '被拒时不该真的发出网络请求');
             assert.equal(QuotaManager.inflightSnapshotForTest().total, 0, '用途路径不预留 inflight');
+        } finally {
+            fetchStub.restore();
+        }
+    },
+
+    /** AC-17：外部 API（`chat`/`chatMessages`）不带身份 ⇒ 只记总量，不建会话/个人账 */
+    async testExternalCallRecordsTotalOnly(): Promise<void> {
+        setup();
+        // 与 Agent.chat / chatMessages 同形：调用 requestModel 但**不传 quotaIdentity**
+        const fetchStub = stubFetch(async () => okResponse(100, 50));
+        try {
+            await requestModel('http://upstream.invalid/v1/chat/completions', 'key', { model: 'fake-model', messages: [] }, {
+                provider: 'test',
+                api: 'openai-completions',
+                use: 'chat',
+                modelName: 'fake-model',
+                rawEstimateTokens: 80,
+            });
+            const store = loadStore(AT);
+            assert.equal(fetchStub.calls, 1, `请求应真的发出一次（实际 ${fetchStub.calls}）`);
+            assert.equal(store.total.h.v, 150, '外部调用仍计入总量（受总量限制约束）');
+            assert.equal(Object.keys(store.sessions).length, 0, '外部调用不得凭空建会话账');
+            assert.equal(Object.keys(store.users).length, 0, '外部调用不得凭空建个人账');
+            assert.equal(QuotaManager.inflightSnapshotForTest().total, 0, '预留必须已释放');
         } finally {
             fetchStub.restore();
         }

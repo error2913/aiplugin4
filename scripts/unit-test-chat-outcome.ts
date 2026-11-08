@@ -144,6 +144,20 @@ export const tests = {
             await child.chat(fakeCtx(), fakeMsg(), '测试');
             assert.equal(child.quotaIdentity().sessionId, 'QQ-Group:root', '子代理必须归到根会话');
             assert.equal(child.quotaIdentity().userId, 'QQ:owner', '子代理发起者不被覆盖');
+
+            // 私聊：sid == uid（同一个 QQ 号）。这样「会话档」与「个人档」是同一份账，
+            // 取 min 即等于取较小的那个百分比，不会出现两档各算一次而互相抵消。
+            const priv = new Session();
+            priv.sessionId = 'QQ:quota-3';
+            priv.sessionType = 'user';
+            priv.setting.aiEnabled = true;
+            priv.bucket.count = 0;
+            priv.bucket.lastTime = Date.now();
+            const privCtx = { ...fakeCtx(), isPrivate: true, group: null } as unknown as seal.MsgContext;
+            await priv.chat(privCtx, fakeMsg(), '测试');
+            assert.equal(priv.quotaIdentity().sessionId, 'QQ:quota-3');
+            assert.equal(priv.quotaIdentity().userId, 'QQ:quota-3', '私聊 sid==uid');
+            assert.equal(priv.quotaIdentity().sessionId, priv.quotaIdentity().userId, '私聊两档同一份账');
         } finally {
             disableQuota();
         }
