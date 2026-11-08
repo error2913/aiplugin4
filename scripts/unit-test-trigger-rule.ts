@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 import { GATE_META, pickWakePrompt, ruleMatchesScope, ruleSkipReason, summarizeGates, validateRule } from '../src/trigger/rule';
 import { createGateRuntime, evaluateGates } from '../src/trigger/eval';
+import { COMMAND_ALIASES, VERB_ALIASES } from '../src/config/static_config/alias';
 import { MODES, MODE_TOKENS, TRIGGER_CONFIG_KEYS, modeByToken } from '../src/config/static_config/trigger_meta';
 import { aliasToCmd, resolveCmdChain } from '../src/utils/alias';
 import { validateTimerSpec } from '../src/utils/timer_spec';
@@ -217,5 +218,29 @@ export const tests = {
         assert.deepEqual(resolveCmdChain(['memory', 'p']), ['memory', 'private'], '非 trg 的 p 仍是旧 private 语义');
         assert.equal(aliasToCmd('priv'), 'privilege');
         assert.equal(aliasToCmd('md'), 'media');
+    },
+    /**
+     * 回归（4.30.0 `8d810db` 引入）：第 1 段可能是**子命令名**而非动词，
+     * 只按动词表归一会让 `.ai tk lst` / `.ai memo lst` / `.ai md list` 等在权限链里保持原值 → 按命令不存在拒绝。
+     */
+    testAliasChainSubCommandPosition(): void {
+        // 9 个命令别名表键：出现在第 1 段（子命令位）时必须归一
+        const cases: [string, string][] = [
+            ['priv', 'privilege'], ['ses', 'session'], ['memo', 'memory'], ['img', 'image'],
+            ['md', 'media'], ['mda', 'media'], ['tk', 'token'], ['ass', 'assistant'],
+        ];
+        for (const [alias, canonical] of cases) {
+            assert.deepEqual(resolveCmdChain(['ai', alias]), ['ai', canonical], `第 1 段 ${alias} 必须归一为 ${canonical}`);
+            assert.deepEqual(resolveCmdChain([alias, 'lst']), [canonical, 'list'], `第 0/1 段 ${alias} 都要归一`);
+        }
+        // 命令表与动词表键不重叠 ⇒ 对第 1 段改用 aliasToCmd 是纯增量（不会改写既有动词解析）
+        const cmdKeys = Object.keys(COMMAND_ALIASES).filter(k => k !== 'AI');
+        assert.equal(cmdKeys.filter(k => k in VERB_ALIASES).length, 0, '命令表与动词表键必须不重叠');
+        for (const [alias, canonical] of Object.entries(VERB_ALIASES)) {
+            assert.deepEqual(resolveCmdChain(['model', alias]), ['model', canonical], `动词 ${alias} 仍按动词表归一`);
+        }
+        // trg 的模式位不受影响（p=prob 而非 private）
+        assert.deepEqual(resolveCmdChain(['trg', 'p']), ['trg', 'prob'], 'trg 模式位仍走触发模式表');
+        assert.deepEqual(resolveCmdChain(['trg', 'rule', 'lst']), ['trg', 'rule', 'list'], 'trg 深层段仍走动词表');
     },
 };
