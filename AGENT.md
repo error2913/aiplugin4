@@ -48,7 +48,8 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 - `src/model/`：模型注册表（`model.ts` + `entry.ts` + `registry_ops.ts`）、能力分类 `catalog.ts`、协议方言 `api_dialect.ts`、请求管道 `provider.ts`/`adapter.ts`、规则 `request_rules.ts`、媒体预设/模板/解析 `media_presets.ts`/`media_template.ts`/`media.ts`、列表 `list.ts`、余额 `balance.ts`、错误分类 `api_error.ts`。
 - `src/memory/`：`manager.ts` 门面、知识库 `knowledge_*.ts`、v2 引擎（`engine.ts` + `scoring`/`consolidation`/`mental_models`/`reflection`/`repository`/`storage`/`prompt`/`templates`/`migrate`）。
 - `src/resource/`：`image.ts`（实体/注册表）、`image_url`/`image_inbound`/`image_text`/`image_transfer`/`image_health`（纯逻辑叶子）、`image_host`（图床客户端）、`image_index`/`image_gc`（索引与清理）、`image_ref`（CIR v1）、`local_paths`/`local_images`（本地资源）。
-- `src/config/`：`config.ts` 总线（20 个分组，60s 缓存）、`configs/*` 只解析、`apply/*` + `hooks.ts` 应用、`ext.ts` 宿主句柄叶子、`v5/`（模型配置 schema/adapt/vendor/default）、`domain/`（角色/技能/MCP/知识库 JSON + `default_data.ts` 生成物）、`static_config/`（常量）。
+- `src/config/`：`config.ts` 总线（21 个分组，60s 缓存）、`configs/*` 只解析、`apply/*` + `hooks.ts` 应用、`ext.ts` 宿主句柄叶子、`v5/`（模型配置 schema/adapt/vendor/default）、`domain/`（角色/技能/MCP/知识库 JSON + `default_data.ts` 生成物）、`static_config/`（常量）。
+- `src/quota/`：用量限制——`types`（类型/错误）、`window`（窗口键/时段解析/峰时系数）、`store`（`quotaUsage` 合并写 + 31 天裁剪）、`manager`（判定/预留/记账/排行）；配置页「用量限制」12 键，命令 `.ai tk quota/me/rank`。
 - `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 27 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本、`src/event/trigger.ts` 事件触发规则、`src/pipeline/event_trigger.ts` 事件触发编排；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
 - `src/utils/`：通用工具已拆叶子——`message_id`/`path`/`alias`/`similarity`/`id`/`revive`/`timeout`/`json`/`render_tags`/`raw_marker`/`special_id`/`target_id`/`url`/`concurrency`/`backend`/`markdown`/`resource` 等；`utils.ts` 只剩 `replyToSender` 等聚合入口，新代码直接 import 对应叶子。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 03 模块 / 04 工具 / 05 命令配置 / 06 存储 / 07 开发指南 / 08 后端 / 09 常见问题 / 10 TODO / 11 核心桥 / 13 记忆系统）。`*-方案.md` 等设计稿统一放 `.dev/docs-archive/`，不随仓库分发。
@@ -65,7 +66,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 7. **配置解析/应用分离**：`configs/*` 只解析，`config/apply/*` + `hooks.ts` 应用；`Config.registerConfig()` 的预热必须走 `getCache`（`warmup()`），否则应用钩子不执行。
 8. **新增消息级能力优先做成工具**（`src/tool/tools/` 下导出 `registerXxx()`，在 `tools/init.ts` 注册）；敏感操作置 `sensitive = true`；工具名不要重复。
 9. **`registerTemplateConfig` 默认值不能是空数组**，至少保留一个元素（占位用 `['']`）。
-10. **配置页签顺序以 `config.ts` 的 `configMap` 为准**（基础/模型/角色/上下文/消息接收/触发/回复/工具/联网/MCP/技能/子代理/记忆/知识库/图片/后端/论坛/事件/资源/错误处理）。
+10. **配置页签顺序以 `config.ts` 的 `configMap` 为准**（基础/模型/用量限制/角色/上下文/消息接收/触发/回复/工具/联网/MCP/技能/子代理/记忆/知识库/图片/后端/论坛/事件/资源/错误处理）。
 11. **提示词文案进段注册表**（`src/prompt/sections/` + `src/prompt/texts/en.ts`，全英文）；协议标记/包装/系统名统一走 `src/utils/protocol.ts`；不要在业务逻辑里硬编码模型可见文本，也不要用 `--fix` 之外的方式绕过依赖分层。
 12. **日志统一走 `Logger`**（脱敏/截断），不要打明文密钥；网络请求统一 `withTimeout` + `fetchData`/`requestModel`。
 13. **修改持久化类字段后检查 `validKeysMap`**（用 `revive()` 恢复）。
