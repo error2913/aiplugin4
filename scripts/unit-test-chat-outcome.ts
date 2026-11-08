@@ -108,10 +108,13 @@ export const tests = {
             session.setting.aiEnabled = true;
             session.bucket.count = 3;
             session.bucket.lastTime = Date.now();
+            const before = session.context.messages.length;
             const outcome = await session.chat(fakeCtx(), fakeMsg(), '测试');
             assert.equal(outcome, 'quota');
             assert.equal(session.bucket.count, 3, 'quota 拒绝不得扣减令牌');
             assert.equal(session.running, false, 'quota 拒绝不得起轮');
+            // AC-04：拒绝时上下文不留残留（不写 system 提示、不迁移标签、不塞用户消息）
+            assert.equal(session.context.messages.length, before, 'quota 拒绝不得改动上下文');
         } finally {
             disableQuota();
         }
