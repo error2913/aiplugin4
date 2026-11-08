@@ -3,7 +3,7 @@
 - 让你的骰娘活起来
 
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Version](https://img.shields.io/badge/Version-4.30.1-green)
+![Version](https://img.shields.io/badge/Version-4.31.0-green)
 ![Docs](https://img.shields.io/badge/docs-文档站-blue)
 
 > 📖 **文档站**：<https://error2913.github.io/aiplugin4/> —— 在线阅读体验更好（全文搜索、深色模式、目录导航）。
@@ -379,7 +379,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 图片全局识别豹语条件 | 填 `'1'` 开启所有图片自动识别转文字；或填豹语表达式限制群/用户范围 |
-| 识别图片时将url转换为base64 | 永不 / 自动 / 总是，解决大模型无法正常获取 QQ 图床图片的问题 |
+| 识别图片时将url转换为base64 | 永不 / 自动 / 总是，解决大模型无法正常获取 QQ 图床图片的问题；4.31.0 起由插件直接下载转换，无需后端 |
 | 图片识别展示截断字数 | 图片识别转文字结果超过该字数时不再压缩，改为仅展示开头部分；完整识别原文保留，可用 `read_raw kind=image` 按图片 ID 阅读（0 为不截断不保留，默认 5000） |
 | 工具产出图片自动类型标签 | 生图/表情包/MCP 图片等工具产出的新图片入库时，按产出者自动打英文类型标签（`ai-generated` / `meme` / `mcp-image` / `tool-image`）；不调用识图模型（默认开） |
 | 自动类型标签每图上限 | 每张工具产出图片最多自动打几个类型标签（1~4，默认 2） |
@@ -533,7 +533,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图片转base64、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效 |
+| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效；图片转 base64 由插件直接下载完成，不需要 46678 后端（旧配置里的 `backends.image-url-to-base64` 不再注册/读取，可自行删除） |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
