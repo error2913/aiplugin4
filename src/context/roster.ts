@@ -88,6 +88,29 @@ export function getGroupById(host: RosterHost, groupId: string | number): Group 
     return Group.get(normalizedId);
 }
 
+/**
+ * 取"写入时冻结"的显示名（#163 REQ-D2-04 / §G⑤）。
+ *
+ * 语义 = `User.get(uid).userName` 的**当前快照**（与旧渲染口径同源，故新旧消息显示一致），
+ * 冻结后随事件落盘，此后改名不再影响这条历史。取不到（无记录 / `User.get` 抛错）返回 `''`
+ * ⇒ 调用方不写该字段 ⇒ 渲染回落活名（旧数据同一条链，REQ-D2-05）。
+ *
+ * **为什么放在 roster 而不是 `context.ts`**：`context.ts → session/user.ts` 是被显式退役的
+ * 依赖边（`deps-baseline.json` 的 `retiredEdges`）。名册域本来就属于「用户资料查询」，
+ * `User` 在这里是既有依赖；把冻结取值的唯一实现放在这里，`context.ts` 只需保持对 `roster`
+ * 的既有依赖，不会复活那条退役边（`npm run deps:check` 会拦）。
+ *
+ * 注意：v2 路径**不做** `autoNameMod` 自动改名（§G⑤：那是 legacy 路径的行为）；
+ * 这里只冻结当前值，不引入行为变更。
+ */
+export function frozenUserName(userId: string): string {
+    try {
+        return User.get(userId).userName || '';
+    } catch {
+        return '';
+    }
+}
+
 export async function findImage(_host: RosterHost, _ctx: seal.MsgContext, id: string): Promise<Image | null> {
     const img = Image.resolveRef(id);
     if (img) return img;

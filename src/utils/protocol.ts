@@ -171,9 +171,31 @@ export const SYSTEM_NAME = {
     event: 'event',
     /** 触发域统一提示（链规则/单模式/自主源/探针/判定，raw.kind 区分来源） */
     triggerRule: 'trigger-rule',
+    /** 无新增事件的起轮标记（其 [time] 是历史里唯一保留的"现在"） */
+    wake: 'wake',
 } as const;
 
 export type SystemName = typeof SYSTEM_NAME[keyof typeof SYSTEM_NAME];
+
+/**
+ * 唤醒 marker 文本：`[wake] <cause>`；距最近一条消息 ≥1h 时追加 `[gap] <相对时长>`。
+ * 说明：这是协议 token，不含绝对时间（绝对时间只能由 `kind:'time'` 注入块提供）。
+ */
+export function wakeMarker(cause: string, gapSec = 0): string {
+    const c = String(cause || 'wake').trim().replace(/\s+/g, '-').toLowerCase() || 'wake';
+    return gapSec > 0 ? `[wake] ${c} [gap] ${formatGap(gapSec)}` : `[wake] ${c}`;
+}
+
+/** 相对时长（仅用于 [gap]）：3h12m / 4m / 2d5h */
+export function formatGap(seconds: number): string {
+    const s = Math.max(0, Math.floor(Number(seconds) || 0));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (d > 0) return `${d}d${h > 0 ? `${h}h` : ''}`;
+    if (h > 0) return `${h}h${m > 0 ? `${m}m` : ''}`;
+    return `${Math.max(1, m)}m`;
+}
 
 // ---------------- 工具结果包装（native 与 PE 统一） ----------------
 

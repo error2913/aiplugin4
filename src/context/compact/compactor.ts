@@ -6,6 +6,7 @@ import { SUMMARY_MAX_CHARS } from "../../utils/context_limits";
 import { SUMMARY_TRUNCATE_MARK, SYSTEM_NAME } from "../../utils/protocol";
 import { toLLMText } from "../content/llm";
 import type { ConversationEvent } from "../events";
+import { isInjection } from "../injections";
 import { applyEdit, RecordIndex } from "../view/records";
 import { ConversationUnit } from "../view/units";
 
@@ -34,6 +35,8 @@ export interface ArchiveDraft {
 }
 
 function renderEventText(event: ConversationEvent, index: RecordIndex): string {
+    // #163 REQ-D3-15 ④：注入块永不进摘要正文 / facts（它们已是给模型看过的字节，重复摘要无意义）
+    if (isInjection(event)) return '';
     // 工具结果不进摘要正文：只给元信息 + read_raw 指针（正文可由 read_raw/grep_raw 回查）。
     // 理由：超长工具输出若整段进入摘要输入，会挤占批次预算并被二次加工；而消费该结果的
     // assistant 回复本身会被正常摘要，结论不会丢。
@@ -63,14 +66,21 @@ function renderEventText(event: ConversationEvent, index: RecordIndex): string {
 /** 单元 → 摘要输入文本（不依赖 renderer 的消息格式；带说话者/时间/工具名，供摘要器理解） */
 function renderUnitText(unit: ConversationUnit, index: RecordIndex): string {
     const lines: string[] = [];
-    for (const event of unit.events) lines.push(renderEventText(event, index));
+    for (const event of unit.events) {
+        const line = renderEventText(event, index);
+        // 注入块返回空串：跳过，避免摘要输入里出现空行（#163 REQ-D3-15 ④）
+        if (line) lines.push(line);
+    }
     if (unit.kind === 'tool_group' && !unit.complete && unit.missingCallIds && unit.missingCallIds.length > 0) {
         lines.push(`[unfinished tool calls: ${unit.missingCallIds.join(', ')}]`);
     }
     return lines.join('\n');
 }
 
-/** 一组单元 → 段文本（单元之间空行分隔） */
+/** 一组单元 → 段文本（单元之间空行分隔；过滤掉渲染为空的单元） */
 export function renderUnitsText(units: readonly ConversationUnit[], index: RecordIndex): string {
-    return units.map(unit => renderUnitText(unit, index)).join('\n\n');
+    return units
+        .map(unit => renderUnitText(unit, index))
+        .filter(text => text !== '')
+        .join('\n\n');
 }

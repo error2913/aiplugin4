@@ -8,7 +8,27 @@ export const SAVE_MIN_INTERVAL_MS = 5000;
 export const SAVE_BATCH = 20;
 
 /** 持久化时排除的运行时字段（监听器/运行状态/挂起队列/节流状态等），不写入存储、不参与 revive 恢复 */
-export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats', 'settleBackoffUntil', 'failStreak', 'lastRuleTimerEnsureAt', 'contextV2', 'quotaSessionId', 'quotaUserId']);
+export const SESSION_RUNTIME_KEYS = new Set(['lastCtx', 'running', 'starting', 'stopVersion', 'pendingQueue', 'activeRuns', 'stopEvent', 'headless', 'toolRestriction', 'parentSessionId', 'subagentDepth', 'noticeQueue', 'headlessTranscript', 'saveTimer', 'lastSaveAt', 'saveDeferCount', 'lastRelevantAt', 'ctxStats', 'settleBackoffUntil', 'failStreak', 'lastRuleTimerEnsureAt', 'contextV2', 'quotaSessionId', 'quotaUserId',
+    // #163 D7-05：前缀 rebase 记账与上轮请求快照都是纯运行时观测（不落盘，理由见 Session 字段注释）
+    'prefixRebase', 'prefixSnapshot', 'rebaseBootNoted', 'injectionAnchorSeq', 'prefixObservation', 'lastSummaryStale',
+    // #163 D9-03/D9-04：缓存命中率滚动窗口与漂移探针同样是纯观测
+    'cacheWindow', 'prefixProbeEnabled', 'prefixProbe']);
+
+/**
+ * rebase 白名单里**配置分区**的键（#163 REQ-D7-06 ⑤）：
+ * 只有这些分区的变更会改变渲染字节，因此只有它们能触发 `config:<key>` rebase。
+ *
+ * 放 persistence（L1 叶子）而不是 session：config/hooks（L2）要引用它，
+ * 若放 session（L3）就变成 L2 → L3 的反向依赖。
+ */
+export const CONFIG_REBASE_KEYS = [
+    'context', 'tool', 'role', 'image', 'model', 'subagent', 'knowledgeBase',
+] as const;
+
+// 引导期归因（reload/upgrade/tools）放在 L0 的 `core/prefix_boot.ts`：
+// 读它的 `utils/message.ts`（L2）不能反向依赖 session（L3），见该文件头注释。
+export { initBootRebaseCause, takeBootRebaseCause, resetBootRebaseCauseForTest } from "../core/prefix_boot";
+export type { BootRebaseCause } from "../core/prefix_boot";
 
 /** 会话忙时挂起的消息：运行中收到的新消息先入队，由下一轮模型请求前统一入库（触发类可在链结束后续跑一轮） */
 export interface PendingMessage {
@@ -24,6 +44,8 @@ export interface PendingMessage {
     /** 落盘轻量字段：重载后用于重建 ctx/msg（getSessionCtxAndMsg）与续跑 */
     epId: string;
     isPrivate: boolean;
+    /** 引用回复的被引 msgId（REQ-D6-11；忙态只记录不展开，flush 时才做网络/IO） */
+    quoteOf?: string;
 }
 
 /** 会话主体的存储键 */
@@ -54,6 +76,8 @@ export function serializePendingQueue(queue: PendingMessage[]): string {
         systemName: p.systemName,
         epId: p.epId,
         isPrivate: p.isPrivate,
+        // 旧挂起分片没有该字段（undefined 被 JSON 丢弃）⇒ 读回 undefined，行为与改造前一致
+        quoteOf: p.quoteOf,
     })));
 }
 

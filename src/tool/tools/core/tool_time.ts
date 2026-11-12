@@ -3,7 +3,7 @@
 // 参数与校验和「默认定时器」TOML / 链 timer 门完全一致（共用 utils/timer_spec.validateTimerSpec）：
 // prompts（1~10 条，fire 时随机一条）为必填；content 仅保留旧调用兼容（等价 1 条 prompts）。
 import { TimerManager } from "../../../timer";
-import { fmtDate } from "../../../utils/string";
+import { fmtDate, fmtDateTz } from "../../../utils/string";
 import { summarizeTimerSpec, validateTimerSpec } from "../../../utils/timer_spec";
 import Tool from "../../tool";
 
@@ -142,4 +142,19 @@ export function registerTime() {
 
         return removed > 0 ? `已取消 ${removed} 个定时器` : '没有可取消的定时器（序号超出范围）';
     }
+
+    // 只读：返回当前本地时间（含时区偏移）。历史消息不再携带时间戳，模型需要"现在"时按需调用。
+    const toolGetTime = new Tool({
+        type: 'function',
+        function: {
+            name: 'get_time',
+            description: 'Get the current local date and time with the timezone offset, e.g. 2026-11-06 21:24:04 +08:00. Call this whenever you need the exact current moment (history no longer carries message timestamps).',
+            parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+        },
+    });
+    toolGetTime.solve = async () => fmtDateTz(Math.floor(Date.now() / 1000));
 }

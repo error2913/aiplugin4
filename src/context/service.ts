@@ -1,7 +1,9 @@
 // Context v2 门面：对外只暴露"会话上下文"这一件事。
 // 上层（Session/Agent/命令/工具/子代理）通过这里写入、取投影、编译请求、召回、压缩；
 // 不直接碰 store/page 细节。
-import type { ConversationEvent, EventInput, Part, RecordEntry } from "./events";
+import { estimateTextTokens } from "../utils/token_estimate";
+
+import type { ConversationEvent, EventInput, Part, QuoteDraft, RecordEntry } from "./events";
 import {
     assistantEventId,
     systemEventId,
@@ -10,8 +12,10 @@ import {
     userEventId,
 } from "./events";
 import type { ContextHead } from "./head";
+import { clampAnchor, INJECTION_WRAP_TOKENS, injectionEventId } from "./injections";
+import type { InjectionItem, InjectionMeta } from "./injections";
 import { buildProjection, ProjectionOptions } from "./projection";
-import { GrepOptions, grepRaw, GrepRawResult, readRaw, ReadRawOptions, ReadRawResult } from "./recall";
+import { findEventByMsgId, GrepOptions, grepRaw, GrepRawResult, readRaw, ReadRawOptions, ReadRawResult } from "./recall";
 import { ContextSnapshot, ContextStore, ContextStoreOptions } from "./store";
 import type { MessageType } from "./types";
 import { CompileOptions, compileRequest, CompileResult, CompileStats } from "./view/compile";
@@ -85,19 +89,100 @@ export class ContextService {
         this.store.commitSummary(record, summarizedThrough, unsummarizedTokens);
     }
 
-    /** 同步追加事件；返回采纳的 seq */
-    appendUser(uid: string, msgId: string, parts: Part[], meta: AppendMeta & { origin?: 'self' } = {}): number[] {
+    /**
+     * 追加 user 事件。
+     *
+     * `meta.fromName`（#163 REQ-D2-04）：**写入时冻结**的显示名，随事件落盘，渲染层只读它。
+     * 调用方（`Context.appendV2User`）负责取 `User.get(uid).userName` 快照；这里只透传，
+     * 不做任何 IO —— 保持 service 层"纯写入"的性质，也避免在测试里需要 mock User。
+     */
+    appendUser(
+        uid: string,
+        msgId: string,
+        parts: Part[],
+        meta: AppendMeta & { origin?: 'self'; fromName?: string } = {},
+    ): number[] {
         const input: EventInput = {
             kind: 'user',
             uid,
             msgId,
             parts,
+            ...(meta.fromName ? { fromName: meta.fromName } : {}),
             eventId: meta.eventId ?? (msgId ? userEventId(msgId, '') : undefined),
             at: meta.at,
             recvAt: meta.recvAt,
             ...(meta.origin ? { origin: meta.origin } : {}),
         };
         return this.store.append([input]);
+    }
+
+    /**
+     * 追加「引用事件 + 回复事件」（REQ-D6-04/06/07）：引用回复展开的唯一写入口。
+     *
+     * - 引用事件 eventId 固定 `q:<被引 msgId>`（不用 `userEventId`，避免与普通 user 事件 `u:<msgId>` 撞车）；
+     * - 两条事件在**同一次** `store.append` 内连续分配 seq ⇒ seq 必然相邻（中间不可能插入并发收信事件）；
+     * - 同一条被引消息第二次出现时（`hasEvent('q:<msgId>')` 为真）不再写引用事件，
+     *   只在回复事件上带 `quoteOf` 指针（渲染层据此输出 `[quote_of:<msgId>]`）；
+     * - 调用方负责 `parts` 的拷贝（两条事件不能共享同一 parts 数组引用）。
+     */
+    appendUserWithQuote(params: {
+        uid: string;
+        msgId: string;
+        parts: Part[];
+        meta?: AppendMeta & { quoteOf?: string; fromName?: string };
+        quote?: QuoteDraft | null;
+    }): { quoteAccepted: boolean } {
+        const meta = params.meta ?? {};
+        const userInput: EventInput = {
+            kind: 'user',
+            uid: params.uid,
+            msgId: params.msgId,
+            parts: params.parts,
+            // #163 REQ-D2-04：回复事件同样冻结显示名（两处写入点都必须冻结，否则改名会改写已发送区）
+            ...(meta.fromName ? { fromName: meta.fromName } : {}),
+            eventId: meta.eventId ?? (params.msgId ? userEventId(params.msgId, '') : undefined),
+            at: meta.at,
+            recvAt: meta.recvAt,
+            ...(meta.quoteOf ? { quoteOf: meta.quoteOf } : {}),
+        };
+        const quote = params.quote ?? null;
+        if (!quote) {
+            this.store.append([userInput]);
+            return { quoteAccepted: false };
+        }
+        const quoteEventId = `q:${quote.msgId}`;
+        if (this.store.hasEvent(quoteEventId)) {
+            // 已展开过：不重复写引用事件（调用方一般已在 meta.quoteOf 带上指针）
+            this.store.append([userInput]);
+            return { quoteAccepted: false };
+        }
+        const quoteInput: EventInput = {
+            kind: 'user',
+            uid: quote.uid || 'unknown',
+            msgId: quote.msgId,
+            parts: quote.parts,
+            eventId: quoteEventId,
+            origin: 'quote',
+            fromName: quote.fromName,
+            quoteOf: quote.msgId,
+        };
+        const accepted = this.store.append([quoteInput, userInput]);
+        return { quoteAccepted: accepted.length === 2 };
+    }
+
+    /** 事件 id 是否已存在（REQ-D6-06 去重判定；供引用展开"只写一次"） */
+    hasEvent(eventId: string): boolean {
+        return this.store.hasEvent(eventId);
+    }
+
+    /**
+     * 按 msg_id 找事件（REQ-D6-01：内存快照 + 落盘事件页；与 read_raw 同一实现）。
+     * 供引用回复展开复用，不新增第二套查找逻辑。
+     */
+    findEventByMsgId(msgId: string): ConversationEvent | null {
+        const id = String(msgId || '').trim();
+        if (!id) return null;
+        return findEventByMsgId(this.store, this.store.snapshot(), id, []);
     }
 
     appendAssistant(msgId: string, parts: Part[], meta: AppendMeta & { reasoning?: string } = {}): number[] {
@@ -161,9 +246,11 @@ export class ContextService {
         eventType?: string;
         raw?: unknown;
         dedupKey?: string;
+        /** 显式 eventId（注入块用确定性 id；优先于 dedupKey） */
+        eventId?: string;
         at?: number;
     }): number[] {
-        const eventId = input.dedupKey ? systemEventId(input.dedupKey, '') : undefined;
+        const eventId = input.eventId ?? (input.dedupKey ? systemEventId(input.dedupKey, '') : undefined);
         return this.store.append([{
             kind: 'event',
             systemName: input.systemName,
@@ -173,6 +260,50 @@ export class ContextService {
             eventId,
             at: input.at,
         }]);
+    }
+
+    /**
+     * 写入一个增量注入块（#163 D3 **唯一写入口**；调用方只给冻结正文与条目明细）。
+     *
+     * 约束：
+     * - 只 append 一个 `kind:'event'` 的 SystemEvent，`raw.injection` 携带元数据（不新增 event kind、
+     *   不新增 `RecordEntry.kind`、不新增 `ContextHead` 字段、`CONTEXT_SCHEMA_VERSION` 保持 2）；
+     * - `afterSeq` 经 `clampAnchor` 夹紧后**冻结**，永不改写（释放判定与渲染定位都读它）；
+     * - `tokens` 落盘冻结（`Σ estimateTextTokens(正文) + INJECTION_WRAP_TOKENS`），
+     *   因为 provider 与渲染侧的估算口径必须一致，且释放后仍要能算出"释放了多少"。
+     *
+     * 返回值：写入的 seq 列表（被 eventId 去重时为空数组）。
+     */
+    appendInjection(input: {
+        kind: string;
+        items: InjectionItem[];
+        afterSeq: number;
+        at?: number;
+        banks?: string[];
+    }): number[] {
+        const items = (input.items || []).filter(item => item && item.k.trim() !== '' && item.text.trim() !== '');
+        if (items.length === 0) return [];
+        const head = this.head();
+        const afterSeq = clampAnchor(input.afterSeq, head.nextSeq, head.archivedThrough);
+        const body = items.map(item => item.text).join('\n');
+        const tokens = items.reduce((sum, item) => sum + estimateTextTokens(item.text), 0) + INJECTION_WRAP_TOKENS;
+        const meta: InjectionMeta = {
+            v: 1,
+            kind: input.kind,
+            afterSeq,
+            tokens,
+            items,
+            createdAt: Date.now(),
+            ...(input.banks && input.banks.length > 0 ? { banks: input.banks } : {}),
+        };
+        return this.appendSystem({
+            systemName: `inject-${input.kind}`,
+            eventType: 'inject',
+            raw: { injection: meta },
+            parts: [{ type: 'text', text: body }],
+            eventId: injectionEventId(input.kind, afterSeq, items),
+            at: input.at,
+        });
     }
 
     appendRecord(record: RecordEntry): void {

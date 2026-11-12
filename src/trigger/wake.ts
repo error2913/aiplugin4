@@ -11,7 +11,7 @@
 // - 忙判由消息入口在调 wake 之前完成（方案 A2），本函数不 defer。
 import { QuotaManager } from "../quota/manager";
 import type { ChatOutcome } from "../session/session";
-import { SYSTEM_NAME } from "../utils/protocol";
+import { SYSTEM_NAME, wakeMarker } from "../utils/protocol";
 import { applyLastMessageRef } from "../utils/seal";
 
 
@@ -27,6 +27,8 @@ export interface WakePayload {
     raw?: Record<string, unknown>;
     /** 起轮原因（日志与 WAIT 冷却文案） */
     reason?: string;
+    /** 无 wakeText 时写 `[wake]` marker 的 cause（at/regex/active-hours/judge/external/…） */
+    cause?: string;
 }
 
 /** wake 只需要 Session 的这几个能力（避免 L2 → L3 的值依赖） */
@@ -39,9 +41,35 @@ export interface WakeSessionLike {
     sessionId?: string;
     /** 配额身份（优先；缺失时退化为 `{sessionId}`，因为合成轮次无触发者） */
     quotaIdentity?(): { sessionId?: string; userId?: string };
+    /** 最近一条已入库事件的时间（秒）；0=空会话。供 `[wake]` 的 `[gap]` 用 */
+    lastMessageAt?(): number;
     context: { addSystemUserMessage(text: string, systemName?: string, extra?: unknown): Promise<void> | void };
     save(force?: boolean): void;
     chat(ctx: seal.MsgContext, msg: seal.Message, reason?: string, toolChoice?: string, options?: { skipBucket?: boolean; bypassGate?: boolean }): Promise<ChatOutcome>;
+}
+
+/** `[gap]` 阈值：距最近一条消息 ≥1h 才写相对间隔（更短时省略，减少噪声） */
+const WAKE_GAP_THRESHOLD_SEC = 3600;
+
+/**
+ * 写 `[wake]` marker：marker 是普通 SystemEvent，`[time]` 由 renderSystemEvent 渲染为写入时刻；
+ * 距最近一条消息 ≥1h 时附带 `[gap] 3h12m` 相对量（不写绝对时间）。
+ * 裁剪桩/测试会话可能没有 context.addSystemUserMessage ⇒ 直接跳过；写失败不阻塞起轮（marker 只是辅助信息）。
+ */
+export async function writeWakeMarker(session: WakeSessionLike, cause: string): Promise<void> {
+    const context = session && session.context;
+    if (!context || typeof context.addSystemUserMessage !== 'function') return;
+    const lastAt = typeof session.lastMessageAt === 'function' ? session.lastMessageAt() : 0;
+    const now = Math.floor(Date.now() / 1000);
+    const gap = lastAt > 0 ? now - lastAt : 0;
+    try {
+        await context.addSystemUserMessage(
+            wakeMarker(cause, gap >= WAKE_GAP_THRESHOLD_SEC ? gap : 0),
+            SYSTEM_NAME.wake,
+        );
+    } catch {
+        // marker 写库失败不影响起轮（下一轮如需时间，模型可调 get_time）
+    }
 }
 
 /**
@@ -80,6 +108,10 @@ export async function wakeSession(session: WakeSessionLike, ctx: seal.MsgContext
             raw: { kind: 'trigger-rule', source: payload.kind, ...(payload.raw || {}) },
         });
         // 提示已入库，先落盘再起轮（避免起轮失败/重载时提示丢失）
+        session.save(true);
+    } else {
+        // 无 wakeText 的入口没有承载"现在"的事件（历史 [time] 已隐藏）⇒ 补 `[wake]` marker
+        await writeWakeMarker(session, payload.cause || payload.kind);
         session.save(true);
     }
     return session.chat(ctx, msg, payload.reason || defaultReason(payload.kind), undefined, {});

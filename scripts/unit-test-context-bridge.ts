@@ -195,9 +195,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
     },
 
     /**
-     * 编译预算口径回归（P0）：
-     * v2 编译的预算必须按 TokenCalibration 校准系数折算、tools 预留必须按 JSON 实际估算，
-     * 否则请求体估算会超出预算且 `omittedFromSeq` 永不出现（“预算到顶”检测不到 → 摘要永不触发）。
+     * 编译预算口径回归（P0，**#163 PR-09 语义已变更**）。
+     *
+     * 仍然要守住的：
+     * ① 有效预算按 `TokenCalibration` 系数折算；② tools 预留按 JSON 实际估算。
+     *
+     * 已经**不再是**不变量（REQ-D2-10 全量渲染）：`budgetTokens` 不决定渲染多少单元，
+     * 所以请求体允许超预算 —— 这是刻意的，超窗口由 `context_too_long` 兜底归档。
+     * 因此旧断言 `requestEstimate <= budgetTokens` 与 `omittedFromSeq 非空` 必须删除，
+     * 改为断言"超预算只体现为 `needsArchive` 观测，且渲染量恒为全量"。
      */
     async testContextCompileBudgetMatchesRequestEstimate() {
         installHost();
@@ -223,11 +229,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
             }
             const real = session.contextV2!;
             let captured: any = null;
-            (session as any).contextV2 = {
-                compile: (options: any) => {
-                    captured = options;
-                    return real.compile(options);
-                },
+            // 只包一层抓参数：**不能**用部分对象替换 contextV2（`handleMessages` 还会调 head()/lastCompile()）
+            const origCompile = real.compile.bind(real);
+            (real as any).compile = (options: any) => {
+                captured = options;
+                return origCompile(options);
             };
             const tools = [{
                 type: 'function',
@@ -254,14 +260,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 'tools 预留按 JSON 实际估算（不再是 tools.length * 20）',
             );
 
-            const requestEstimate = (out as any[]).reduce((sum, message) => sum + estimateMessageTokens(message), 0)
-                + estimateTextTokens(JSON.stringify(tools));
-            assert.ok(requestEstimate <= captured.budgetTokens, `请求体估算 ${requestEstimate} 应 ≤ 有效预算 ${captured.budgetTokens}`);
-
             const stats = real.lastCompile();
             assert.ok(stats, '编译应写入最近编译统计');
-            assert.notEqual(stats!.omittedFromSeq, null, '预算到顶必须能检测到 omittedFromSeq');
-            assert.ok((stats!.omittedToSeq ?? 0) >= 1);
+            assert.equal(stats!.unitsRendered, 12, '全量渲染：6 轮问答 = 12 个单元，一个都不能少');
+            assert.equal(stats!.needsArchive, true, '渲染总量超预算 ⇒ needsArchive 观测为真');
+
+            // 请求体可以超预算（全量渲染的必然结果），但**超了的量级**必须有界且可解释：
+            // 只允许由"本轮全部历史"决定，不能被预算二次裁剪（否则 R1 破）。
+            const requestEstimate = (out as any[]).reduce((sum: number, message: any) => sum + estimateMessageTokens(message), 0)
+                + estimateTextTokens(JSON.stringify(tools));
+            assert.ok(requestEstimate > captured.budgetTokens, `全量渲染允许超预算（实际 ${requestEstimate} > ${captured.budgetTokens}）`);
+            assert.equal(out.length >= 12, true, `12 个单元至少 12 条消息（实际 ${out.length}）`);
         } finally {
             Agent.get = origAgentGet;
             if (origBudget === undefined) delete TC.intConfigs['上下文预算']; else TC.intConfigs['上下文预算'] = origBudget;

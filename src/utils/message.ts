@@ -2,6 +2,7 @@
 import Config from "../config/config";
 import type { ConversationEvent } from "../context/events";
 import type { CompiledMessage } from "../context/view/compile";
+import { takeBootRebaseCause } from "../core/prefix_boot";
 import { logger } from "../logger";
 import { resolveEffectiveMaxTokens } from "../model/api_error";
 import { getProbedContextWindow } from "../model/window_cache";
@@ -17,7 +18,8 @@ import User from "../session/user";
 import { TokenCalibration } from "../token_calibration";
 import { ToolCall, ToolContentPart } from "../tool/types";
 
-import { resolveContextBudgets } from "./context_budget";
+import { resolveArchiveL, resolveContextBudgets } from "./context_budget";
+import type { ArchiveBudgetInput } from "./context_budget";
 import { foldOmittedLine, foldSummaryHeader, AUX_HISTORY_OMIT_MARK as PROTOCOL_AUX_HISTORY_OMIT_MARK, SYSTEM_NAME, toolResultHeader } from "./protocol";
 import { getRoleSetting } from "./role";
 import { escapeToolResultBoundary, fmtDate } from "./string";
@@ -68,8 +70,6 @@ export interface MultimodalBuildOptions {
     excludeImageIds?: Set<string>;
     /** 本次请求实际使用的模型（可达性判断 + 模型级图片限制覆盖） */
     model?: { baseUrl?: string; imageLimits?: ImageLimits };
-    /** runtime 段文本（由 agent 每轮构建一次传入；缺省时 handleMessages 兜底构建） */
-    runtimeText?: string;
     /** 请求图片轨迹（可选；失败恢复用） */
     trace?: ImageTraceState;
     /** 本轮图片块数量预算（同一次请求共享；缺省由 handleMessages 按配置创建） */
@@ -89,7 +89,12 @@ export interface MultimodalBuildOptions {
 
 interface MessageItem {
     text: string;
-    time: number;
+    /**
+     * 秒。
+     * #163 D1-02：已不参与渲染（`[time]` 渲染分支已删除），仅旧档 / legacy 迁移路径可能残留，
+     * 故改为可选；新写入点一律不写。
+     */
+    time?: number;
     userId?: string;
     messageId?: string;
     systemName?: string;
@@ -186,7 +191,7 @@ export async function buildSystemMessage(ctx: seal.MsgContext, session: Session)
         role: 'system',
         contentItems: [{
             text: content,
-            time: Math.floor(Date.now() / 1000),
+            // #163 D1-02：不写 time（system 是请求体最前端，每轮变化的时间戳会作废整个前缀）
             systemName: ''
         }]
     };
@@ -201,8 +206,8 @@ function buildSamplesMessages(ctx: seal.MsgContext): ContextMessage[] {
         .map((x, i) => ({
             role: i % 2 === 0 ? 'user' : 'assistant',
             contentItems: [{
+                // #163 D1-01：不写 time —— samples 是请求体第 2 条消息，任何每轮变化的字节都会作废整个前缀
                 text: x.item,
-                time: Math.floor(Date.now() / 1000),
                 userId: i % 2 === 0 ? '' : ctx.endPoint.userId
             }]
         }));
@@ -228,13 +233,17 @@ export function windowCharsForTier(tier: 'L0' | 'L1' | 'L2', baseChars: number):
     return baseChars;
 }
 
-/** 折叠行的短摘要（纯代码，零 LLM）：保留发送者/时间与开头若干字 */
+/**
+ * 折叠行的短摘要（纯代码，零 LLM）：保留发送者与开头若干字。
+ * #163 D1-02：不再渲染 `[time]` —— 折叠摘要属于历史渲染，时间戳每秒变化同样会作废前缀。
+ */
 function foldLine(item: any, max = 40): string {
-    const who = item.userId ? formatFromPrefix(item.userId) : (item.systemName ? `[system:${item.systemName}]` : '');
-    const time = item.time ? `[time:${fmtDate(item.time)}]` : '';
+    const who = item.userId
+        ? formatFromPrefix(item.userId, item.frozenName)
+        : (item.systemName ? `[system:${item.systemName}]` : '');
     const text = String(item.text || '').replace(/\s+/g, ' ').trim();
     const head = text.length > max ? `${text.slice(0, max)}…` : text;
-    return `- ${who}${time} ${head}`;
+    return `- ${who} ${head}`;
 }
 
 /** 折叠摘要自身占整包预算的比例（保证"窗口 + 摘要"整体不超预算） */
@@ -336,7 +345,7 @@ export function foldContextMessages(messages: ContextMessage[], budgetChars: num
 
     const foldItem = {
         text: foldText,
-        time: Math.floor(Date.now() / 1000),
+        // #163 D1-02：折叠摘要也不带时间（它由窗口内容计算得出，属历史渲染）
         systemName: SYSTEM_NAME.condensedHistory,
     };
     const first = kept[0];
@@ -528,7 +537,7 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     const { tokens: maxTokens } = resolveEffectiveMaxTokens(configuredTokens, getProbedContextWindow(modelName || ''));
     if (maxTokens <= 0) return messages;
 
-    const reserve = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
+    const reserve = toolsReserveTokensOf(tools);
     // 口径与 v2 编译共用 resolveCompileBudget：先按校准系数折算预算，再扣 tools 预留。
     // 与旧实现 `factor > 0 ? max(floor(maxTokens / factor - reserve), 1)` 等价（reserve 为整数，
     // floor(x - reserve) === floor(x) - reserve），故旧路径行为不变。
@@ -562,6 +571,144 @@ function applyTokenBudget(messages: ContextMessage[], protectedCount: number, to
     return messages;
 }
 
+/**
+ * tools schema 的 token 预留（缓存）。
+ *
+ * 前缀缓存（#163 D8-05）：原生路径下 `tools` 恒为同一份三元素数组（`Tool.getNativeRequestTools`
+ * 模块级缓存），故其 JSON 与 token 数**逐轮恒定**。这里按数组**引用**缓存估算结果，
+ * 避免每轮重复 `JSON.stringify` 三个工具 schema（约 2KB）。
+ *
+ * 不做成模块级常量是因为本文件还服务子代理/外部调用方（可能传不同 tools，
+ * 如 `src/subagent/wiring.ts` 传 `toolsReserveTokens: 0`）。
+ */
+let toolsReserveRef: unknown[] | null = null;
+let toolsReserveValue = 0;
+
+function toolsReserveTokensOf(tools: unknown[] | undefined): number {
+    if (!Array.isArray(tools) || tools.length === 0) return 0;
+    if (tools === toolsReserveRef) return toolsReserveValue;
+    toolsReserveRef = tools;
+    toolsReserveValue = estimateTextTokens(JSON.stringify(tools));
+    return toolsReserveValue;
+}
+
+/** 外部只读入口：tools schema 的 token 估算（同一数组引用命中缓存；见 `toolsReserveTokensOf`） */
+export function estimateToolsTokens(tools: unknown[] | undefined): number {
+    return toolsReserveTokensOf(tools);
+}
+
+/**
+ * 前缀 token 估算（#163 REQ-D7-10/11 的**唯一**实现）。
+ *
+ * 编译路径与注入侧的预算闸必须用同一个函数算 `prefixTokens`，否则两边 `L` 会有偏差，
+ * 出现"注入以为装得下、编译以为装不下"的裂缝。
+ */
+export function prefixTokensOf(prefix: ReadonlyArray<{ content: unknown }>): number {
+    let total = 0;
+    for (const message of prefix) {
+        total += estimateTextTokens(
+            typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
+        );
+    }
+    return total;
+}
+
+/**
+ * 构造归档预算输入（#163 REQ-D7-10/11）：`L` 的**唯一**构造入口（注入侧用）。
+ *
+ * 编译路径已在本地持有 `prefix` 时走 `prefixTokensOf(prefix)`，两者同源同口径。
+ * `system` 必须与 `compileV2Request` 的 `prefix[0]` 同源（同一个 `promptPartsToSystemMessage` 产物），
+ * samples 也必须同源（同一个 `buildSamplesMessages`），否则 `prefixTokens` 会二次偏差。
+ */
+export function buildArchiveBudgetInput(
+    ctx: seal.MsgContext,
+    session: Session,
+    system: ContextMessage,
+    tools: unknown[] | undefined,
+    modelName: string | undefined,
+): { input: ArchiveBudgetInput; retainPercent: number } {
+    const budgets = resolveContextBudgets(session, modelName || '');
+    const permanentBudget = resolveCompileBudget(budgets.permanentBudget, modelName);
+    const prefix: CompiledMessage[] = [system, ...buildSamplesMessages(ctx)].map(message => ({
+        role: message.role as CompiledMessage['role'],
+        content: buildContent(message),
+    }));
+    return {
+        input: {
+            permanentBudget,
+            prefixTokens: prefixTokensOf(prefix),
+            toolsReserveTokens: toolsReserveTokensOf(tools),
+            // PR-08 起 runtime 段整体删除 ⇒ 恒为 0；字段保留以维持单一口径
+            runtimeTokens: 0,
+        },
+        retainPercent: budgets.retainPercent,
+    };
+}
+
+/**
+ * 编译成功后的 rebase 归因（#163 REQ-D7-06 ⑥⑦⑧⑨）。
+ *
+ * 三件事：
+ * 1. **引导期首编译**：进程重启后 `prefixSnapshot` 必为空（纯运行时字段），首编译必然换掉前缀。
+ *    这是设计允许的 rebase，但要显式记账（`upgrade`/`tools`/`reload`），否则会被当成"非白名单漂移"。
+ * 2. **摘要 stale 跳变**：`stats.summaryStale` 由 false→true 时，编译回退为"不按摘要边界裁剪"，
+ *    已发送区的渲染字节随之改变 ⇒ 一次 rebase。
+ * 3. **冻结守卫触发**（`stats.prefixDrift`，REQ-D2-16）：说明正常路径漏了前缀纯度（例如旧数据
+ *    `[from]` 回落活名被改名）。守卫已经用快照覆盖回冻结区，所以缓存不会一轮一轮重新预热；
+ *    但仍必须**显式记账**，否则这个 bug 会被静默吞掉。这是 `prefix-drift-freeze` 的唯一来源。
+ */
+function notePrefixRebaseCauses(
+    session: Session,
+    stats: { summaryStale: boolean; prefixDrift?: number },
+): void {
+    if (!session.rebaseBootNoted && !session.prefixSnapshot && session.contextV2?.head().nextSeq > 1) {
+        session.rebaseBootNoted = true;
+        session.notePrefixRebase(takeBootRebaseCause() ?? 'reload', 0);
+    }
+    if (stats.summaryStale && !session.lastSummaryStale) {
+        session.notePrefixRebase('summary-stale', 0);
+    }
+    session.lastSummaryStale = stats.summaryStale;
+    if (typeof stats.prefixDrift === 'number') {
+        session.notePrefixRebase('prefix-drift-freeze', 0);
+    }
+}
+
+/**
+ * 前缀漂移探针（#163 REQ-D9-04）：只在 `.ai ctx debug` 打开时运行，默认零成本。
+ *
+ * 只比「上一轮已发送区」：`prev.hashes` 是上轮编译产物的短哈希，
+ * 而注入块 `afterSeq >= lastSentSeq` 必然落在上轮尾部之后 ⇒ 天然不参与比较。
+ * 因此一旦 `firstDiffIndex !== null`，就说明**已发送区中间**被改动了 —— 这正是要抓的 bug，
+ * 若把注入块也算进来就会每轮误报（块会随归档释放而消失）。
+ */
+function runPrefixProbe(session: Session, messages: CompiledMessage[], throughSeq: number): void {
+    if (!session.prefixProbeEnabled) return;
+    const hashes = messages.map(message => prefixMessageHash(message));
+    const prev = session.prefixProbe;
+    let firstDiffIndex: number | null = null;
+    const comparable = Math.min(prev.hashes.length, hashes.length);
+    for (let i = 0; i < comparable; i++) {
+        if (prev.hashes[i] !== hashes[i]) {
+            firstDiffIndex = i;
+            break;
+        }
+    }
+    session.prefixProbe = { count: hashes.length, hashes, throughSeq, firstDiffIndex };
+}
+
+/** 单条消息的稳定短哈希（宽度 32 位十六进制；只用于比对，不做安全用途） */
+function prefixMessageHash(message: CompiledMessage): string {
+    const text = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+    let h = 0x811c9dc5;
+    const input = `${message.role}\u0000${text}`;
+    for (let i = 0; i < input.length; i++) {
+        h ^= input.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16);
+}
+
 /** 用 Context v2 编译本轮请求；未接入 v2 返回 null（走旧路径） */
 function compileV2Request(
     session: Session,
@@ -571,7 +718,6 @@ function compileV2Request(
     tools: unknown[] | undefined,
     modelName: string | undefined,
     opts: MultimodalBuildOptions | undefined,
-    runtimeTokens: number,
 ): CompiledMessage[] | null {
     if (!session.contextV2) return null;
     try {
@@ -584,18 +730,22 @@ function compileV2Request(
         // 未乘校准系数时编译会误以为“装得下”，导致请求体实际超预算且 omittedFromSeq 永不出现。
         const budget = resolveCompileBudget(budgets.requestBudget, modelName);
         // 工具 schema 预留按 JSON 实际估算（旧实现 tools.length * 20 远小于真实值，请求体因此超预算）。
-        const toolsReserveTokens = Array.isArray(tools) && tools.length > 0
-            ? estimateTextTokens(JSON.stringify(tools))
-            : 0;
-        // v7 归档：L = 预算 − 除滑动窗口外的全部提示词（system/samples + 工具 schema + runtime 段）。
+        // #163 D8-05：原生路径 tools 是同一引用 ⇒ 命中引用缓存，不重复 stringify。
+        const toolsReserveTokens = toolsReserveTokensOf(tools);
+        // v7 归档：L = 预算 − 除滑动窗口外的全部提示词（system/samples + 工具 schema）。
         // 用永久预算（不含 context_too_long 临时 cap），并按编译同一校准口径换算。
         const permanentBudget = resolveCompileBudget(budgets.permanentBudget, modelName);
         // 前缀 token 与编译同口径（把同一个 prefixTokens 传给 compile，保证 L 与编译可用预算一致）
-        const prefixTokens = prefix.reduce((n, m) => n + estimateTextTokens(
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-        ), 0);
-        const fixedPromptTokens = prefixTokens + toolsReserveTokens + Math.max(0, Math.floor(runtimeTokens));
-        const L = Math.max(1, permanentBudget - fixedPromptTokens);
+        const prefixTokens = prefixTokensOf(prefix);
+        // #163 REQ-D7-10/11：L 的唯一实现（编译层与注入写入前的预算闸同源，逐位一致）
+        // #163 D1c（PR-08）：runtime 尾块已删除 ⇒ runtimeTokens 恒为 0；
+        // 字段保留是为了维持「L 只有一个构造口径」，签名不动（避免连带其它 PR）。
+        const L = resolveArchiveL({
+            permanentBudget: permanentBudget,
+            prefixTokens,
+            toolsReserveTokens,
+            runtimeTokens: 0,
+        });
         opts?.archiveHooks?.beforeCompile?.({ L, retainPercent: budgets.retainPercent });
         // 本轮内联图片预算（同一次请求共享）：超出后只留文本标签（descriptors 会先渲染 [img:ID] 文本）
         const cfgLimit = Config.image.MAX_IMAGES_PER_REQUEST;
@@ -615,6 +765,11 @@ function compileV2Request(
             caps: { vision: multimodal },
             toolImages: opts?.toolImages ?? Config.image.TOOL_RESULT_IMAGES,
             toolResultMaxTokens: Config.tool.TOOL_RESULT_MAX_TOKENS,
+            // #163 PR-09（REQ-D2-12）：单元边界随发送冻结 —— 跨 anchor 的相邻 user 不合并。
+            // 不传会让下一轮新增的 user 消息被并进已发送的 user 单元 ⇒ 已发送字节被改写。
+            anchorSeq: session.injectionAnchorSeq,
+            // #163 PR-09（REQ-D2-16）：冻结守卫。快照是纯运行时字段，重载后为空 ⇒ 首轮无守卫。
+            prefixSnapshot: session.prefixSnapshot ?? undefined,
             resolve: {
                 imageUrl: (ref: string) => {
                     try {
@@ -665,6 +820,8 @@ function compileV2Request(
             },
             resolveUserName: (uid: string) => {
                 const number = uid.replace(/^.+:/, '');
+                // 旧数据（无 `fromName`）的活名回落：只有这里允许读用户表（见 REQ-D2-05 + §G②，
+                // 前缀纯度守卫的 ALLOWLIST 已收窄到本上下文）。新事件一律走冻结 `fromName`。
                 try {
                     const name = User.get(uid).userName;
                     return name ? `${name}(${number})` : number;
@@ -673,9 +830,6 @@ function compileV2Request(
                 }
             },
             formatTime: fmtDate,
-            formatMessageId: (id: string) => id,
-            tagBoundaryTokens: budgets.tagBoundaryTokens,
-            formatDateKey: (at: number) => fmtDate(at).slice(0, 10),
             estimateTextTokens,
             estimateEventTokens: (event: ConversationEvent) => estimateEventTokens(event),
         });
@@ -685,6 +839,17 @@ function compileV2Request(
                 opts.trace.refs,
             );
         }
+        notePrefixRebaseCauses(session, compiled.stats);
+        runPrefixProbe(session, compiled.messages, compiled.stats.lastSelectedSeq);
+        // #163 REQ-D2-16：编译输出即写作 —— 快照与锚点由**编译结果**驱动（写作规范 §4.9）。
+        //
+        // 顺序要求：`notePrefixRebaseCauses` 可能调 `notePrefixRebase`（会把快照置空），
+        // 因此必须在它**之后**写回，否则刚记的 rebase 会被本轮的快照覆盖成"没发生过"。
+        session.prefixSnapshot = {
+            messages: compiled.messages.map(message => JSON.stringify(message)),
+            throughSeq: compiled.stats.lastSelectedSeq,
+        };
+        session.injectionAnchorSeq = Math.max(session.injectionAnchorSeq, compiled.stats.lastSelectedSeq);
         return compiled.messages;
     } catch (error) {
         logger.warning('上下文请求构建失败，回退旧路径: ' + (error instanceof Error ? error.message : String(error)));
@@ -692,15 +857,9 @@ function compileV2Request(
     }
 }
 
-/**
- * 追加 runtime 段（时间/记忆等易变内容）：以 user 角色注入，不进稳定 system 前缀。
- * 消息不持久化，只在本次请求体里出现。
- */
-function withRuntimeContext(messages: RequestMessage[], runtimeText: string): RequestMessage[] {
-    if (!runtimeText) return messages;
-    messages.push({ role: 'user', content: `[system:runtime]\n${runtimeText}\n[/system]` });
-    return messages;
-}
+// 说明：#163 D1c（PR-08）已删除原 `withRuntimeContext(...)`（把 runtime 段以
+// `[system:runtime]` user 消息追加到请求体末尾）。runtime 通道整体移除后，
+// 易变内容（时间/记忆/MCP 说明）改由增量注入块承载，不再出现在请求体尾部。
 
 export async function handleMessages(
     ctx: seal.MsgContext,
@@ -711,15 +870,14 @@ export async function handleMessages(
     modelName?: string,
     opts?: MultimodalBuildOptions
 ): Promise<RequestMessage[]> {
-    let runtimeText = opts?.runtimeText || '';
     let system = systemMessage;
     if (!system) {
         const parts = await buildPromptParts(ctx, session);
         system = {
             role: 'system',
-            contentItems: [{ text: parts.system, time: Math.floor(Date.now() / 1000), systemName: '' }],
+            // #163 D1-02：不写 time（system 在请求体最前端）
+            contentItems: [{ text: parts.system, systemName: '' }],
         };
-        runtimeText = runtimeText || parts.runtime;
     }
     const samplesMessages = buildSamplesMessages(ctx);
     // 本轮图片预算（同一次请求共享；v2/v1 两条路径一致）。配置 0 = 不限。
@@ -741,11 +899,8 @@ export async function handleMessages(
     // 事件账本：请求完全由 compileRequest 决定，不再走下面的旧 messages 折叠/预算/配对路径。
     // 编译失败才回退旧路径（迁移失败/兼容场景），避免冷热折叠等旧逻辑在 v2 下继续执行。
     if (session.contextV2) {
-        const runtimeTokens = runtimeText
-            ? estimateTextTokens(`[system:runtime]\n${runtimeText}\n[/system]`)
-            : 0;
-        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName, messageOpts(), runtimeTokens);
-        if (compiled) return withRuntimeContext(compiled as RequestMessage[], runtimeText);
+        const compiled = compileV2Request(session, system, samplesMessages, multimodal, tools, modelName, messageOpts());
+        if (compiled) return compiled as RequestMessage[];
     }
     const clonedContext = (session.context.messages as ContextMessage[]).map(cloneContextMessage);
     const contextMessages = buildContextMessages(clonedContext, renderFoldBudget(session, clonedContext));
@@ -801,7 +956,7 @@ export async function handleMessages(
                 traceStates.reduce<string[]>((all, state) => all.concat(state.refs), []),
             );
         }
-        return withRuntimeContext(peMessages, runtimeText);
+        return peMessages;
     }
 
     // 非 PE 路径会真正发送 role:'tool'；配对（tool_call_id ↔ tool_calls[].id）由下面的过滤循环
@@ -914,7 +1069,7 @@ export async function handleMessages(
             traceStates.reduce<string[]>((all, state) => all.concat(state.refs), []),
         );
     }
-    return withRuntimeContext(finalMessages as RequestMessage[], runtimeText);
+    return finalMessages as RequestMessage[];
 }
 
 export function buildContent(message: ContextMessage): string {
@@ -928,12 +1083,13 @@ export function buildContent(message: ContextMessage): string {
                 let from = '';
                 // 系统名义消息（systemName）不参与发送者切换判断，也不渲染 from
                 if (item.userId && item.userId !== lastUserId) {
-                    from = formatFromPrefix(item.userId);
+                    // 冻结名优先（#163 REQ-D2-04）：旧数据没有该字段 ⇒ formatFromPrefix 内部回落活名
+                    from = formatFromPrefix(item.userId, (item as { frozenName?: string }).frozenName);
                 }
                 if (item.userId) lastUserId = item.userId;
                 const prefix = from
                     + (item.systemName ? `[system:${item.systemName}]` : '')
-                    + (item.time ? `[time:${fmtDate(item.time)}]` : '')
+                    // #163 D1-02：历史 [time] 完全不渲染（时间改由增量注入块 + get_time 提供）
                     + (item.messageId ? `[msg_id:${item.messageId}]` : '');
                 const text = item.text || '';
                 // 防注入：系统名义消息（群事件/触发原因/定时器等）成对加边界，明确「背景通知」范围
@@ -957,11 +1113,32 @@ export function buildContent(message: ContextMessage): string {
     return '';
 }
 
-/** 把 uid（QQ:xxx）渲染成 [from:名字(QQ号)]，未记录名字时退化为 [from:QQ号] */
-function formatFromPrefix(uid: string): string {
+/**
+ * 把 uid（QQ:xxx）渲染成 `[from:名字(QQ号)]`（#163 REQ-D2-04）。
+ *
+ * 显示名优先取**写入时冻结**的 `item.frozenName`；旧数据没有该字段才回落活名
+ * （`legacyLiveName`，该函数是前缀纯度守卫里唯一被白名单豁免的活读点）。
+ * 未记录名字时退化为 `[from:QQ号]`。
+ */
+function formatFromPrefix(uid: string, frozenName?: string): string {
     const number = uid.replace(/^.+:/, '');
-    const name = User.get(uid).userName;
+    const name = frozenName || legacyLiveName(uid);
     return name ? `[from:${name}(${number})]` : `[from:${number}]`;
+}
+
+/**
+ * 旧数据（无 `frozenName`）的活名回落 —— **唯一的**活读用户表位置。
+ *
+ * 为什么允许：`需求方案 §11.3` 明确禁止回填历史页（append-only），因此改造前写入的消息
+ * 永远拿不到冻结名。§G② 已裁决接受"旧消息改名后 `[from]` 变一次"这一权衡；新写入的消息
+ * 一律带 `frozenName`，不受影响。
+ */
+function legacyLiveName(uid: string): string {
+    try {
+        return String(User.get(uid).userName || '');
+    } catch {
+        return '';
+    }
 }
 
 /** 解析 [img:...] 标签里的图片引用（CIR v1：插件 ID / h<sha> / 裸 sha / 头像别名） */

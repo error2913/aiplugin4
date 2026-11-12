@@ -1,11 +1,9 @@
-// 资源段（`core:resources`，order 211）：内置图片数量/最近 ID + `resource:<name>` 清单。
+// 资源段（`core:resources`，order 211）：资源清单用法（**常量段**）。
 //
-// 只读 aux 注册表里的 `resource` 片段（结构化数据）与 texts 文案，不 import 资源适配器实现
-//（§13.1：prompt/sections 只允许 `core/ports/aux_tools` 元数据 + texts）。
-// 开关与预算：资源页「资源清单注入」（默认关）/「资源清单预算」（缺省 600）；
-// 缓存依赖含 auxRegistry.revision()，避免缓存住动态 ID 列表（§10.5）。
-import { auxRegistry } from '../../core/ports/aux_tools';
-import { RESOURCE_USAGE, resourceSnippetLines } from '../texts/en';
+// #163 D1-07：本段不再读 aux 注册表里的 `resource` 片段，也不渲染内置图片数量/最近 ID/
+// `resource:<name>` 清单 —— 那些是"随能力与使用情况每轮变化"的字节，会让 system 中部漂移。
+// 现在只由配置开关（资源页「资源清单注入」）与预算控制；清单/数量由 list_resources 现场查询。
+import { RESOURCE_USAGE } from '../texts/en';
 import type { PromptSection } from '../types';
 
 /** 段硬上限（方案 §10.5：maxChars 600）；配置预算只能在此范围内收紧 */
@@ -22,10 +20,6 @@ function truncateTo(text: string, max: number): string {
     return `${text.slice(0, Math.max(0, max - 1))}…`;
 }
 
-function stringList(value: unknown): string[] {
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && !!item) : [];
-}
-
 export function registerResourceSections(): PromptSection[] {
     return [
         {
@@ -33,24 +27,13 @@ export function registerResourceSections(): PromptSection[] {
             order: 211,
             channel: 'system',
             maxChars: SECTION_MAX_CHARS,
+            // 常量段：只依赖配置快照（开关 + 预算），不再读 aux 注册表（图/资源数量变化不得影响 S）
             cache: {
-                deps: c => [c.flags.resourceLibrary, c.flags.resourceBudget, auxRegistry.revision()],
+                deps: c => [c.flags.resourceLibrary, c.flags.resourceBudget],
             },
-            build: c => {
-                if (!c.flags.resourceLibrary) return '';
-                const snippet = auxRegistry.snippet('resource');
-                if (!snippet) return '';
-                const data = snippet.data || {};
-                const text = [
-                    RESOURCE_USAGE,
-                    resourceSnippetLines({
-                        imageCount: Number(data.builtinImageCount) || 0,
-                        recentImages: stringList(data.recentImages),
-                        localResources: stringList(data.localResources),
-                    }),
-                ].filter(Boolean).join('\n');
-                return truncateTo(text, budgetOf(c.flags.resourceBudget));
-            },
+            build: c => (c.flags.resourceLibrary
+                ? truncateTo(RESOURCE_USAGE, budgetOf(c.flags.resourceBudget))
+                : ''),
         },
     ];
 }

@@ -6,7 +6,10 @@ import Logger from "../logger";
 import Image from "../resource/image";
 import Group from "../session/group";
 import { Session } from "../session/session";
-import User from "../session/user";
+// `User` 仅用于 `getUserById(): User | null` 的返回类型 ⇒ 必须是 `import type`：
+// `src/context/context.ts -> src/session/user.ts` 是被显式退役的依赖边（deps-baseline.json
+// 的 retiredEdges），运行期 import 会把它复活；类型导入在 esbuild 里被完全剔除。
+import type User from "../session/user";
 import { ToolCall, ToolContentPart } from "../tool/types";
 import { LEGACY_USER_MESSAGE_MAX_TOKENS } from "../utils/context_limits";
 import { buildToolTruncateMarkerTokens, buildUserTruncateMarker, buildUserTruncateMarkerTokens } from "../utils/raw_marker";
@@ -16,15 +19,16 @@ import { truncateMiddleToTokenBudget, truncateToTokenBudget } from "../utils/tok
 import { estimateTextTokens } from "../utils/token_estimate";
 
 import { archiveByTokenIfNeeded as archiveByTokenIfNeededImpl, settleWindowIfNeeded as settleWindowIfNeededImpl, trimToWindow as trimToWindowImpl } from "./archiver";
+import { archiveControllerFor } from "./compact/session_runtime";
 import { demoteMediaParts } from "./content/render";
 import { parseText } from "./content/text_parse";
 import { normalizeToolResult } from "./content/tool_result";
-import { type ConversationEvent, type Part, toolResultEventId } from "./events";
+import { type ConversationEvent, type Part, QuoteDraft, toolResultEventId } from "./events";
 import { EVENT_PAGE_MAX_SINGLE_EVENT_BYTES, measureEventPageBytes } from "./log/page_store";
 import Message from "./message";
 import { editEventParts } from "./mutations";
 import { buildProjection, DEFAULT_PROJECTION_MAX_TOKENS, DEFAULT_PROJECTION_MAX_UNITS } from "./projection";
-import { findImage as findImageOf, getGroupById as getGroupByIdOf, getUserById as getUserByIdOf, setName as setNameOf, updateName as updateNameOf, userInfoList as userInfoListOf } from "./roster";
+import { findImage as findImageOf, frozenUserName as frozenUserNameOf, getGroupById as getGroupByIdOf, getUserById as getUserByIdOf, setName as setNameOf, updateName as updateNameOf, userInfoList as userInfoListOf } from "./roster";
 import { runtimeOf } from "./runtime";
 import type { ContextService } from "./service";
 import { AssistantMessage, AssistantMessageItem, MessageType, SystemUserMessageItem, ToolCallbackMessage, ToolCallsMessage, UserMessage, UserMessageItem } from "./types";
@@ -72,6 +76,14 @@ function flushGroupUserMemories(session: Session): void {
         }
     }
 }
+
+/**
+ * 取"写入时冻结"的显示名（#163 REQ-D2-04 / §G⑤）。
+ *
+ * 唯一实现已下沉到 `roster.frozenUserName`（那里本来就有 `User` 依赖，属于名册域）；
+ * 这里只做本地别名，避免 `context.ts` 复活 `-> session/user.ts` 这条被退役的依赖边。
+ */
+const frozenUserName = frozenUserNameOf;
 
 /** 上下文条目定位引用：addSystemUserMessageTracked 的返回值，供事件去重"后到覆盖先到"就地替换 */
 export interface SystemEntryRef {
@@ -292,7 +304,13 @@ export class Context {
     private appendV2User(text: string, userId: string, messageId: string): void {
         const service = this.v2Service;
         if (!service) return;
-        service.appendUser(userId, messageId, parseText(stripInternalTags(text), 'model-output'));
+        // #163 REQ-D2-04：显示名**写入时冻结**（随事件落盘），渲染层只读它 ——
+        // 否则用户改名会把已发送历史的 `[from:...]` 字节全部改掉（R1 破裂）。
+        // 取值与旧渲染口径同源（`User.get(uid).userName`），因此新旧消息显示一致；
+        // 旧数据没有 `fromName` 的仍回退活名（不回填历史页，REQ-D2-05）。
+        service.appendUser(userId, messageId, parseText(stripInternalTags(text), 'model-output'), {
+            fromName: frozenUserName(userId),
+        });
         this.invalidateV2();
         this.flushV2();
     }
@@ -325,6 +343,21 @@ export class Context {
 
     get agent(): Agent { return getAgent(this.agentName); }
     get session(): Session { return this.agent.sessionService.getSession(this.sessionId); }
+
+    /**
+     * 历史层改写 → 前缀 rebase 记账（#163 REQ-D7-06 ④）。
+     *
+     * 为什么不在 `mutations.ts` 里直接记：那里只有 `ContextStore`，拿不到 Session；
+     * 而 rebase 是**会话级**语义（同一 store 可能被多个视图读取）。
+     * 失败静默：游离会话（`getAgent` 抛错）不影响编辑本身。
+     */
+    private noteHistoryRebase(reason: string, seq: number): void {
+        try {
+            this.session?.notePrefixRebase?.(reason, seq);
+        } catch {
+            // 未接入会话（离线编辑/迁移）时静默
+        }
+    }
     get users(): string[] {
         const userSet = new Set<string>();
         for (const m of this.messages) {
@@ -425,6 +458,8 @@ export class Context {
             time: Math.floor(Date.now() / 1000),
             userId,
             messageId,
+            // #163 REQ-D2-04：显示名写时冻结（legacy 路径同样渲染 `[from]`，同样会被改名改写）
+            frozenName: frozenUserName(userId),
             compressed: true,
         };
         if (COLD_SINGLE_TRUNCATE > 0 && original.length > COLD_SINGLE_TRUNCATE) {
@@ -503,11 +538,55 @@ export class Context {
             time: Math.floor(Date.now() / 1000),
             userId,
             messageId,
+            // #163 REQ-D2-04：显示名写时冻结（与 v2 路径同口径）
+            frozenName: frozenUserName(userId),
             ...(single.changed ? { compressed: true } : {}),
             ...(rawText !== undefined ? { rawText } : {})
         });
         // 群内用户会话的权重更新节流持久化（避免每条消息全量写盘）
         flushGroupUserMemories(this.session);
+    }
+
+    /**
+     * 用户消息入库（带引用展开）：v2 路径先写「引用事件」再写回复事件（REQ-D6-04/10）。
+     *
+     * - `quote` 为已解析的冻结快照（null = 未展开/解析失败/无 reply 段）；
+     * - 失败时调用方已把 `[quote_unavailable:<id>]` 拼进 `text`，本方法照常入库，不抛错；
+     * - 已展开过同一被引消息（`hasEvent('q:<msgId>')`）时只写回复事件并在其上带 `quoteOf` 指针；
+     * - v1（未接事件账本）不做引用展开，直接回退普通入库（行为与改造前完全一致）。
+     */
+    async addUserMessageWithQuote(
+        ctx: seal.MsgContext,
+        text: string,
+        userId: string,
+        messageId: string,
+        quote: QuoteDraft | null,
+    ): Promise<void> {
+        const service = this.v2Service;
+        if (!service) {
+            // v1 兼容路径：旧 messages 模型没有"引用事件"概念，不做展开只普通入库
+            await this.addUserMessage(ctx, text, userId, messageId);
+            return;
+        }
+        if (Config.context.STANDBY_QUOTA > 0 && this.isRecordOnlySession() && !this.allowColdIngest()) return;
+        // 与 appendV2User 同口径：入库前兜底剥离内部标签，再解析成 parts（引用 parts 走同一写入路径 ⇒
+        // D2 的写入期截断同样覆盖引用事件，REQ-D6-08 不另设上限）
+        const parts = parseText(stripInternalTags(text), 'model-output');
+        const already = quote ? service.hasEvent(`q:${quote.msgId}`) : false;
+        // #163 REQ-D2-04：回复事件同样冻结显示名（引用事件由 QuoteDraft.fromName 携带）
+        service.appendUserWithQuote({
+            uid: userId,
+            msgId: messageId,
+            parts,
+            // REQ-D6-06：已展开过 ⇒ 只在回复事件上加 [quote_of] 指针
+            meta: {
+                ...(already && quote ? { quoteOf: quote.msgId } : {}),
+                fromName: frozenUserName(userId),
+            },
+            quote: already ? null : quote,
+        });
+        this.invalidateV2();
+        this.flushV2();
     }
 
     addAssistantMessage(text: string, messageId: string, reasoningContent?: string) {
@@ -594,6 +673,8 @@ export class Context {
             const parts = parseText(stripInternalTags(text), 'internal');
             const ok = editEventParts(this.v2Service.getStore(), ref.seq, parts);
             if (ok) {
+                // #163 REQ-D7-06 ④：就地改写历史事件会改变**已发送区**的渲染字节 ⇒ 白名单 rebase（edit）
+                this.noteHistoryRebase('edit', ref.seq);
                 this.invalidateV2();
                 this.flushV2();
             }
@@ -755,14 +836,35 @@ export class Context {
         return trimToWindowImpl(this);
     }
 
+    /**
+     * `context_too_long` / `payload_too_large` 纠错路径：把活动上下文硬切到目标以下。
+     *
+     * #163 PR-09 行为变更（**重要**）：历史层改成全量渲染（REQ-D2-10）后，`budgetTokens`
+     * 不再决定"渲染多少单元"——它只用于 `needsArchive` 观测。因此旧实现"收紧本轮编译预算后
+     * 直接重发"会让第二轮请求与第一轮**逐字节相同**，必然再次超长（纯空转，还会白白烧一次缓存）。
+     * 现在改成走归档控制器 `forceCutBelow(target)`：零 LLM 硬切推进 `archivedThrough`，
+     * 并显式记一次 `archive` rebase —— 正好符合 R3「归档是唯一 rebase 点」。
+     *
+     * 临时预算上限仍然记录（`.ai ctx` 观测 + 后续轮次的预算口径），但不再是修复手段。
+     * @returns `'converged'` = 已切到目标以下（或本来就够小）；`'failed'` = 切不动（只剩一个
+     *          单元 / 单条自身超目标），调用方应放弃本轮，由下一轮归档继续收敛。
+     */
     async archiveByTokenIfNeeded(targetTokens?: number): Promise<'converged' | 'busy' | 'failed'> {
-        if (this.v2Service) {
-            // v2 不在错误路径物理归档：按报文解析出的目标收紧下一轮编译预算，
-            // 否则重发会完全复现同一请求，形成“归档空转”。
-            if (typeof targetTokens === 'number' && targetTokens > 0) this.v2BudgetCap = Math.floor(targetTokens);
+        if (!this.v2Service) return archiveByTokenIfNeededImpl(this, targetTokens);
+        const target = typeof targetTokens === 'number' && targetTokens > 0 ? Math.floor(targetTokens) : 0;
+        if (target <= 0) return 'converged';
+        this.v2BudgetCap = target;
+        // 游离会话（离线编辑/迁移/单测直接 new Context）拿不到 Session ⇒ 只能放弃纠错，
+        // 但这不影响正确性：下一轮正常路径的 beforeRequest 仍会按 L 硬切。
+        let controller: ReturnType<typeof archiveControllerFor> = null;
+        try {
+            controller = archiveControllerFor(this.session);
+        } catch {
             return 'converged';
         }
-        return archiveByTokenIfNeededImpl(this, targetTokens);
+        if (!controller) return 'converged';
+        if (controller.isSummarizing()) return 'busy';
+        return controller.forceCutBelow(target) ? 'converged' : 'failed';
     }
 
     getUserById(userId: string | number): User | null {

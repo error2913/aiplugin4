@@ -7737,27 +7737,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
         );
     },
 
-    /** 提示词工程工具块（toolCallFormat）应包含调用格式和元工具参数 */
+    /**
+     * 提示词工程工具块（toolCallFormat）应包含调用格式和元工具摘要。
+     *
+     * #163 D1-11：**不再渲染各元工具的 parameters JSON**（那会让 S 随工具注册/开关漂移），
+     * 只列 `META_TOOL_SUMMARIES` 的名字 + 一句话用途，参数 schema 由 search_tools 现场返回。
+     */
     testPromptEngineeringToolBlockContainsMetaParams(): void {
         registerDispatchTools();
-        const session = {
-            sessionType: 'group',
-            toolState: {
-                list_tools: true,
-                search_tools: true,
-                call_tool: true,
-            }
-        } as any;
-        const block = toolCallFormat(Tool.getMetaToolInfos(session, 'QQ').map(info => ({
+        const block = toolCallFormat();
+        assert.ok(block.includes('## Tool calls'), '应包含调用格式说明');
+        assert.ok(block.includes('### list_tools'), '应包含 list_tools 摘要');
+        assert.ok(block.includes('### search_tools'), '应包含 search_tools 摘要');
+        assert.ok(block.includes('### call_tool'), '应包含 call_tool 摘要');
+        assert.ok(!block.includes('page_size'), '不再内联元工具参数（改由 search_tools 现场返回）');
+        assert.ok(block.includes('search_tools'), '应指引用 search_tools 取参数');
+
+        // 关键断言（R1）：常量 —— 无论会话工具开关如何，输出逐字节相同
+        const session = { sessionType: 'group', toolState: {} } as any;
+        const withInfos = toolCallFormat(Tool.getMetaToolInfos(session, 'QQ').map(info => ({
             name: info.function.name,
             description: String(info.function.description || ''),
             parameters: info.function.parameters ?? { type: 'object', properties: {} },
-        })));
-        assert.ok(block.includes('## Tool calls'), '应包含调用格式说明');
-        assert.ok(block.includes('### list_tools'), '应包含 list_tools 参数');
-        assert.ok(block.includes('### search_tools'), '应包含 search_tools 参数');
-        assert.ok(block.includes('### call_tool'), '应包含 call_tool 参数');
-        assert.ok(block.includes('page_size'), '应包含元工具参数说明');
+        })) as any);
+        assert.equal(withInfos, block, 'toolCallFormat 不随元工具开关/注册变化（常量段）');
     },
 
     /** skill_list 支持分页参数 */
@@ -9891,7 +9894,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const builtin = Object.keys(toolMap).filter(n => !toolMap[n].group);
         const missing = builtin.filter(n => !toolMap[n].category);
         assert.deepEqual(missing, [], `内置工具必须打上分类（缺: ${missing.join('、')}）`);
-        assert.equal(builtin.length, 64, `内置工具数应为 64（新增 resolve_context_ref + 触发规则三件套），实际 ${builtin.length}`);
+        assert.equal(builtin.length, 65, `内置工具数应为 65（新增 resolve_context_ref + 触发规则三件套 + get_time），实际 ${builtin.length}`);
 
         const byCategory: { [k: string]: string[] } = {};
         for (const n of builtin) (byCategory[Tool.categoryOf(toolMap[n])] = byCategory[Tool.categoryOf(toolMap[n])] || []).push(n);

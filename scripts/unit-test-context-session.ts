@@ -8,6 +8,7 @@ import { SubCmd } from '../src/cmd/root_cmd';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { getHost, setHost } from '../src/core/host';
+import { setAgentResolver } from '../src/core/ports/agent_registry';
 import { SessionService } from '../src/session/session_service';
 import { Session } from '../src/session/session';
 import { sessionStorageKey } from '../src/session/persistence';
@@ -96,7 +97,18 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(event.parts.some((part: any) => part.type === 'text' && part.text.includes('看图')));
     },
 
-    async testContextTooLongTightensBudget() {
+    /**
+     * `context_too_long` 纠错路径（#163 PR-09 语义变更）。
+     *
+     * 旧行为：收紧本轮编译预算 → 重发。全量渲染（REQ-D2-10）后预算**不决定渲染多少单元**，
+     * 于是"收紧预算"会逐字节重发同一请求 ⇒ 必然再次超长（空转）。
+     * 新行为：走归档控制器 `forceCutBelow(target)`，零 LLM 硬切推进 `archivedThrough`，
+     * 并显式记一次 `archive` rebase（R3：归档是唯一 rebase 点）。
+     *
+     * 因此本用例断言的是「水位真的被推进 + 请求真的变短」，而不是"预算值被记下"。
+     * 需要 `setAgentResolver`：`Context.session` 走 agent 注册表，单测里没有真实 agent。
+     */
+    async testContextTooLongForcesArchiveCut() {
         installHost();
         const service = new SessionService();
         service.agentName = '*';
@@ -104,17 +116,58 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const session = service.getSession(sid);
         session.sessionType = 'user';
         (session.context as any).isColdSession = () => false;
-        for (let i = 0; i < 5; i++) {
-            await session.context.addUserMessage({} as seal.MsgContext, `${i} `.repeat(500), 'QQ:1', `ct${i}`);
+        setAgentResolver(() => ({ sessionService: service }) as any);
+        try {
+            // user/assistant 交替 ⇒ 每条各自成为单元（连续 user 会被 segmentUnits 合并成一个单元，
+            // 而 `selectCut` 永不切最后一个单元 ⇒ 单单元上下文切不动）
+            for (let i = 0; i < 5; i++) {
+                await session.context.addUserMessage({} as seal.MsgContext, `用户${i} `.repeat(500), 'QQ:1', `ct${i}`);
+                session.context.addAssistantMessage(`助手${i} `.repeat(500), `ca${i}`);
+            }
+            const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
+            const before = JSON.stringify(await handleMessages({} as seal.MsgContext, session, false, undefined, system));
+            const archivedBefore = session.contextV2!.head().archivedThrough;
+
+            const outcome = await session.context.archiveByTokenIfNeeded(200);
+            assert.equal(outcome, 'converged', '切得动就返回 converged');
+            assert.equal(session.context.v2BudgetCapValue, 200, '临时预算上限仍记录（.ai ctx 观测用）');
+            const archivedAfter = session.contextV2!.head().archivedThrough;
+            assert.ok(archivedAfter > archivedBefore, `纠错路径必须真的推进归档水位（${archivedBefore} → ${archivedAfter}）`);
+            assert.equal(session.prefixRebase?.reason, 'archive', '硬切必须显式记一次 archive rebase');
+            assert.equal(session.prefixSnapshot, null, 'rebase 后旧前缀基线必须作废');
+
+            const after = JSON.stringify(await handleMessages({} as seal.MsgContext, session, false, undefined, system));
+            assert.ok(after.length < before.length, `归档后请求应缩短（${before.length} → ${after.length}）`);
+            session.context.setV2BudgetCap(null);
+            assert.equal(session.context.v2BudgetCapValue, null);
+        } finally {
+            setAgentResolver(null);
         }
-        const system = { role: 'system', contentItems: [{ text: 'system prompt' }] } as any;
-        const before = JSON.stringify(await handleMessages({} as seal.MsgContext, session, false, undefined, system));
-        await session.context.archiveByTokenIfNeeded(200);
-        assert.equal(session.context.v2BudgetCapValue, 200, '超长错误应设置临时预算上限');
-        const after = JSON.stringify(await handleMessages({} as seal.MsgContext, session, false, undefined, system));
-        assert.ok(after.length < before.length, `收紧预算后请求应缩短（${before.length} → ${after.length}）`);
-        session.context.setV2BudgetCap(null);
-        assert.equal(session.context.v2BudgetCapValue, null);
+    },
+
+    /**
+     * 纠错路径切不动（只剩一个单元 / 单条自身超目标）时返回 `'failed'`，不假装成功。
+     * 这是 `agent.handleModelError` 决定 giveup 还是 retry 的唯一依据。
+     */
+    async testContextTooLongUncuttableReportsFailed() {
+        installHost();
+        const service = new SessionService();
+        service.agentName = '*';
+        const sid = 'QQ:context-too-long-single';
+        const session = service.getSession(sid);
+        session.sessionType = 'user';
+        (session.context as any).isColdSession = () => false;
+        setAgentResolver(() => ({ sessionService: service }) as any);
+        try {
+            // 只有一条 user 消息 ⇒ 单单元 ⇒ selectCut 永远切不动
+            await session.context.addUserMessage({} as seal.MsgContext, '超长单条 '.repeat(2000), 'QQ:1', 'ct-single');
+            const archivedBefore = session.contextV2!.head().archivedThrough;
+            const outcome = await session.context.archiveByTokenIfNeeded(50);
+            assert.equal(outcome, 'failed', '切不动必须如实返回 failed');
+            assert.equal(session.contextV2!.head().archivedThrough, archivedBefore, '水位不得假装前移');
+        } finally {
+            setAgentResolver(null);
+        }
     },
 
     async testCtxCommandUserFacing() {

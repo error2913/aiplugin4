@@ -337,32 +337,42 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(none.tools().length, 0);
     },
 
-    /** flags 派生：三段独立、imageHost 由片段派生、旧 imageLibrary 兼容字段 = imageHost */
+    /**
+     * flags 派生（#163 D1-07 后）：三段只由**配置开关**决定，不再看 aux 注册表片段。
+     * 旧 imageLibrary 兼容字段 = imageHost。
+     */
     testPromptFlagDerivation(): void {
         const base = {
             receiveImage: false,
-            imageHostPrompt: true,
+            imageHostPrompt: false,
             resourcePrompt: false,
-            hasImageHostSnippet: false,
-            hasResourceSnippet: false,
         };
+        // 全关：三段都空
         assert.deepEqual(
             deriveImagePromptFlags(base),
             { imageUsage: false, imageHost: false, resourceLibrary: false, imageLibrary: false },
         );
         // 只开接收图片：也显示通用图片用法（有意修正 #2）
         assert.equal(deriveImagePromptFlags({ ...base, receiveImage: true }).imageUsage, true);
-        // 有图床片段：图床段开，通用段跟着开
-        const host = deriveImagePromptFlags({ ...base, hasImageHostSnippet: true });
+        // 图床开关开：图床段开，通用段跟着开（**不再要求** aux 片段存在）
+        const host = deriveImagePromptFlags({ ...base, imageHostPrompt: true });
         assert.equal(host.imageHost, true);
         assert.equal(host.imageUsage, true);
         assert.equal(host.imageLibrary, true);
-        // 开关关时片段存在也不注入
-        assert.equal(deriveImagePromptFlags({ ...base, hasImageHostSnippet: true, imageHostPrompt: false }).imageHost, false);
-        // 资源段：开关 + 片段同时满足
-        assert.equal(deriveImagePromptFlags({ ...base, resourcePrompt: true, hasResourceSnippet: true }).resourceLibrary, true);
-        assert.equal(deriveImagePromptFlags({ ...base, resourcePrompt: true, hasResourceSnippet: false }).resourceLibrary, false);
-        assert.equal(deriveImagePromptFlags({ ...base, resourcePrompt: false, hasResourceSnippet: true }).resourceLibrary, false);
+        // 资源段：只看开关
+        assert.equal(deriveImagePromptFlags({ ...base, resourcePrompt: true }).resourceLibrary, true);
+        assert.equal(deriveImagePromptFlags({ ...base, resourcePrompt: true }).imageUsage, true);
+        assert.equal(deriveImagePromptFlags({ ...base, resourcePrompt: false }).resourceLibrary, false);
+        // 关键断言（R1）：派生结果与「图床/MCP 是否连接」无关 —— 入参里已没有 aux 片段字段
+        assert.deepEqual(
+            Object.keys(deriveImagePromptFlags(base)).sort(),
+            ['imageHost', 'imageLibrary', 'imageUsage', 'resourceLibrary'],
+        );
+        assert.equal(
+            'hasImageHostSnippet' in base || 'hasResourceSnippet' in base,
+            false,
+            '入参不得再含 aux 片段字段（否则 system 会随连断漂移）',
+        );
     },
 
     /** 装配：默认（图床未配置/资源段关）只注册 builtin + generic；开启后端图床后出现 image-host 片段 */

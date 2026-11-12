@@ -126,7 +126,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 - **智能对话**：支持上下文感知的 AI 对话、角色设定与预设上下文（示例对话）；
 - **记忆体系**：长期记忆（向量检索 + 标签/用户/群组过滤）、观察记忆、配置驱动的知识库（JSON 配置 + Markdown 正文自动分块）；
-- **工具系统**：内置 40+ 工具函数（TRPG 检定、牌堆抽取、消息、图片、禁言、定时器等），支持函数调用与提示词工程两种模式，可接入外部 MCP 服务器与可配置技能；
+- **工具系统**：内置 60+ 工具函数（TRPG 检定、牌堆抽取、消息、图片、禁言、定时器、原文检索、当前时间等），支持函数调用与提示词工程两种模式，可接入外部 MCP 服务器与可配置技能；
 - **图片处理**：图片识别、表情包管理、Markdown/HTML 渲染为图片与本地图片资源；
 - **权限体系**：命令权限（会话/用户/强触三维）与工具权限（禁止/默认关闭/按会话开关）；
 - **多智能体与多端协作**：子代理委派（后台并行 / 可续跑 / 完成通知）与公开会话目录（跨平台、跨账号的会话只读与外发）；
@@ -357,11 +357,24 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 |:---:|:---|
 | 预设上下文 | 每框一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
 | 上下文预算 | 上下文 token 预算（默认 131072）；0 = 跟随报错探测到的模型真实窗口 × 0.8（未探测到回退 100 万），显式正数优先 |
-| 保留强度 | 压缩后保留最新原文占上下文预算的百分比（默认 30，范围 1-100）；其余滚动摘要。该比例同时作为 `[msg_id]`/`[time]` 标签边界：边界内全标签，更旧消息去 `[msg_id]`、`[time]` 只在关键时间节点出现 |
+| 保留强度 | 压缩后保留最新原文占上下文预算的百分比（默认 30，范围 1-100）；其余滚动摘要。4.32.0 起不再兼职「标签边界」：历史消息已不带 `[msg_id]`/`[time]`（见下文「前缀缓存」） |
 | 待机入库配额 | 待机会话每小时最多入库多少条普通群消息（默认 0=不限制） |
 | 归档保留原文 | 默认开启：归档后原文页保留，可 `grep_raw`/`read_raw` 回查。关闭后，已被滚动摘要覆盖的归档页会被物理清除、之后检索不可达（省存储，不省 LLM；未总结的硬切/待机归档块仍保留原文直到被总结覆盖） |
 
 > 旧版「上下文最大token / 对话保存轮数 / 窗口上限字数 / 冷态窗口字数 / 消息压缩阈值 / 结算水位 / 每小时后台压缩上限…」等键已不再注册；升级后请按新键重新配置。
+
+#### 前缀缓存：为什么聊得越久越省钱（4.32.0）
+
+主流大模型服务商对「请求体开头与上一次相同」的部分按缓存价计费（通常只有正常输入价的 1/10 甚至更低），命中的部分也不需要重新预填充，首字更快。命中是按**字节前缀**判定的：请求体最前面只要有一个字节变了，它后面的全部失效。
+
+本版把"每次都可能变"的内容从请求体前部彻底搬走，让同一会话连续聊天时，**system 提示词 + 预设上下文 + 工具 schema + 已发送的历史**这一整段保持逐字节不变：
+
+- 历史消息不再带 `[msg_id]`、`[time]` 标记（原先它会按"本轮还剩多少预算"伸缩，一伸缩就把中间的历史改写掉）。要让 AI 找旧消息、查时间，用 `grep_raw` / `read_raw` / `get_time` 工具，效果一样且不打碎缓存。
+- 用户改名、改群名片、图床掉线、开关某个工具，都**不会**改写已发送的历史和提示词；引用回复会明确标出"引用了哪条消息"。
+- 当前时间、长期记忆、MCP 服务器说明不再每轮重新塞进提示词，而是改成**只在内容变化时追加到对话末尾**（时间还是按需查：AI 觉得需要时会调 `get_time`）。
+- 历史不再按预算"掐头去尾"：可见的历史一律完整给出，装不下就归档压缩，不再从中间抽走几条。
+
+想确认自己有没有吃到缓存收益：`.ai ctx` 里新增的「缓存」一行直接显示本会话近 100 轮的真实命中率（`cache_read_tokens / prompt_tokens`）；「前缀」一行显示本会话有没有发生过前缀重建（正常应为 `前缀：稳定`）。若命中率长期偏低，可用 `.ai ctx debug` 打开前缀漂移探针，状态里的「前缀守卫」会显示首个差异位置。归档、手动清空上下文、编辑历史、改影响提示词的配置、重载 JS 都会造成一次**不可避免**的前缀重建（这时「前缀」会显示已重建次数与原因），属预期。
 
 ### 消息接收
 
@@ -590,13 +603,13 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 自 4.29.0 起，system prompt 由内置**英文段注册表**组装（不再是一份大模板）：
 
-- 稳定段进 system：身份 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片与图库 / 回复方式 / 工作方向 / **能力地图** / 工具获取或调用格式 / 可用技能 / 知识库 / 子代理委派；段级缓存 30 秒（技能/知识库/工具开关/角色设定等任一变化即失效）。
+- 稳定段进 system：身份 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片与图库 / 回复方式 / 工作方向 / **能力地图** / 工具获取或调用格式 / 可用技能 / 知识库 / 子代理委派；段级缓存 30 秒（技能/知识库/工具开关/角色设定等任一变化即失效）。4.32.0 起这些段全部是**常量或纯配置门控**的：不再枚举会话里的工具/技能/知识库，图库数量、最近宿主 ID、`resource:<name>` 清单也改由 `list_resources` / 图片工具现场查询 —— 这样图床掉线、增删资源都不会改写 system 前缀。
 - **能力地图**：按当前会话已开启、平台匹配的工具组列出“能力域 + 用途 + 2 个代表工具”（不含参数），并明确要求“不确定能力时先 list_tools/search_tools，不要直接说做不到”；STATUS 关闭或无可用工具时不出现。MCP 服务器的用途标签取配置 `description`，缺省用 `initialize` 的 `serverInfo.title`，再缺省用服务器名。
-- 易变段走 runtime：当前时间 / 长期记忆以 user 消息 `[system:runtime]…[/system]` 注入，system 前缀跨轮稳定。记忆段末尾附一条低权威约束句（背景、非当前请求、相关才用）；空记忆段整体丢弃，群聊多 bank 时个人 bank 按相关性降序（当前会话 bank 固定第一、global 固定最后）。
+- **运行期可变内容不含在 system 里**（4.32.0 起）：当前时间 / 长期记忆 / MCP 服务器说明改为「增量注入块」，只在内容变化时追加到对话末尾，system 前缀逐轮字节稳定。原「易变段走 runtime」的 `[system:runtime]` 尾块已删除；`PromptParts.runtime` 字段仅为兼容外部 hook 签名而保留（恒为空）。
 - 内置提示词与代码生成的上下文标记均为英文且**不兼容旧中文标记**（旧会话中的中文标记按普通文本保留）；角色设定、技能正文、知识库正文等用户内容保持原语言，机器人按对话语言回复。
-- 外部插件可注册扩展段：`globalThis.aiplugin4.registerPromptSection({ name: 'ext:xxx:yyy', order: 10000, channel: 'system', build: ctx => '...' })`（限 `ext:` 命名空间、单段 ≤2000 字符、合计 ≤4000 字符、默认外部清洗）；也可用 `onPromptAssemble(fn)` 整体改写 system/runtime。
-- 调试：`.ai prompt` 查看 system + runtime；`.ai prompt sections` 查看段统计（order/name/channel/chars/tokens/cache）与 digest。开发侧可用 `npm run prompt:snapshot` 把 group/private 两种会话的 system/runtime/段统计输出到 `test-reports/prompt-baseline/`，便于重构前后对比。
-- MCP 服务器 `initialize` 返回的 `instructions` 默认不注入；在「MCP服务器」对应条目加 `"exposeInstructions": true` 后以低权威 runtime 段注入（外部清洗、单服务器 ≤1000 字符、合计 ≤2000 字符）。MCP prompts/resources 由 `.ai mcp prompt list|get` 与 `mcp_list_resources`/`mcp_read_resource` 按需使用，不自动进 system prompt。每台服务器可选 `"description": "用途一句话"`（能力地图与 `.ai mcp list` 展示用途；缺省用 initialize 的 `serverInfo.title`）。
+- 外部插件可注册扩展段：`globalThis.aiplugin4.registerPromptSection({ name: 'ext:xxx:yyy', order: 10000, channel: 'system', build: ctx => '...' })`（限 `ext:` 命名空间、单段 ≤2000 字符、合计 ≤4000 字符、默认外部清洗）；也可用 `onPromptAssemble(fn)` 整体改写 system（返回 `runtime` 文本已不生效，只会打一条 warning）。外部插件还可注册**注入 provider**（`registerExtensionInjectionProvider`）：产出的条目会作为增量注入块追加到对话尾部，而不是塞进 system。
+- 调试：`.ai prompt` 查看 system prompt；`.ai prompt sections` 查看段统计（order/name/channel/chars/tokens/cache）与 digest。开发侧可用 `npm run prompt:snapshot` 把 group/private 两种会话的 system/段统计输出到 `test-reports/prompt-baseline/`，便于重构前后对比。
+- MCP 服务器 `initialize` 返回的 `instructions` 默认不注入；在「MCP服务器」对应条目加 `"exposeInstructions": true` 后以**低权威增量注入块**注入（4.32.0 起不再走 runtime 段；外部清洗、单服务器 ≤1000 字符、合计 ≤2000 字符，`[system:inject-mcp]` 包裹）。MCP prompts/resources 由 `.ai mcp prompt list|get` 与 `mcp_list_resources`/`mcp_read_resource` 按需使用，不自动进 system prompt。每台服务器可选 `"description": "用途一句话"`（能力地图与 `.ai mcp list` 展示用途；缺省用 initialize 的 `serverInfo.title`）。
 - 发现类工具（`list_tools`/`search_tools`/`list_mcps`/`call_tool`）的模型可见结果与错误为英文；`list_tools` 组头带代表工具与分页提示，`search_tools` 返回完整参数并提示用 `call_tool` 执行。
 
 ---
@@ -627,11 +640,12 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
 | `.ai status` | - | 查看当前会话设置 |
-| `.ai ctx` | - | 查看上下文状态：消息数、预算/保留强度、L/A/B/C 水位、归档与在飞总结、清理状态、最近一次整理结果 |
+| `.ai ctx` | - | 查看上下文状态：消息数、预算/保留强度、L/A/B/C 水位、归档与在飞总结、清理状态、最近一次整理结果；4.32.0 起另加四行：`前缀`（稳定 / 已重建 N 次（最近原因：X））、`注入`（活动块数/token/跳过数）、`前缀守卫`（上次校验通过 / 首差异位置 N / -）、`缓存`（近 100 轮命中率） |
 | `.ai ctx archive` | - | **手动**归档为滚动摘要并抽取长期记忆（会花 LLM）；默认不删原文（「归档保留原文」关闭时清理已总结归档页） |
 | `.ai ctx hide [user\|assistant\|all]` | `.ai ctx hide assistant` | 隐藏消息（原文保留，可审计；不影响长期记忆） |
 | `.ai ctx purge --yes` | - | 清除本会话上下文（不可恢复；仅骰主；不影响长期记忆） |
 | `.ai ctx repair` | - | 检查/修复上下文索引 |
+| `.ai ctx debug` | - | 切换前缀漂移探针（开发排查用，默认关）：开启后每轮比对上轮已发送区的消息哈希，`.ai ctx` 的「前缀守卫」显示首个差异位置 |
 | `.ai ctx set [budget=<token>] [retain=<1-100>]\|clr` | `.ai ctx set budget=100000 retain=30` | 按会话覆盖上下文预算/保留强度（需邀请者以上）；budget=0 表示跟随模型窗口；clr 恢复默认 |
 | `.ai live` / `.ai live all` | `.ai live` | 查看会话实时运行状态：`.ai live` 查看当前会话(流式/运行/排队/定时器)；`.ai live all` 查看全局活跃会话总览(仅骰主) |
 | `.ai help <子指令>` / `.ai <子指令> help` | `.ai help tool` | 查看子命令帮助；`.ai <子指令> help` 带更多参数时交由子命令自身处理（如 `.ai tool help <函数名>`） |
@@ -789,7 +803,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 |:---:|:---|
 | Dispatch | `list_tools`（按工具组列出当前平台工具）、`search_tools`（按名称/关键词/工具组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
 | Commands | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
-| Timers | `set_timer`、`show_timer_list`、`cancel_timer` |
+| Timers | `set_timer`、`show_timer_list`、`cancel_timer`、`get_time`（返回当前时间与时区偏移；4.32.0 起历史消息不再带 `[time]`，AI 需要"现在几点"时用它） |
 | Triggers | `set_trigger_condition` |
 | Memory | `memory_recall`、`memory_add`、`memory_update`、`memory_delete`、`memory_consolidate`、`memory_reflect`、`memory_mental_model`（action: list/view/create/refresh/clear/delete） |
 | Images | `image_to_text`（文字描述，`ids[]`≤3）、`image_view`（多模态直接看，`ids[]`≤4；不支持视觉时降级）、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |

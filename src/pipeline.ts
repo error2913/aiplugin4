@@ -448,7 +448,7 @@ export class MessagePipeline {
 
                         // 2) @ 触发（R17：触发页「被@触发」开关，默认开；私聊不触发）
                         if (Config.trigger.AT_TRIGGER && detectBotMention(messageArray, ctx)) {
-                            await wakeSession(session, ctx, msg, { kind: 'mode', reason: '@', raw: { mode: 'at' } });
+                            await wakeSession(session, ctx, msg, { kind: 'mode', reason: '@', raw: { mode: 'at' }, cause: 'at' });
                             return;
                         }
 
@@ -456,7 +456,7 @@ export class MessagePipeline {
                         if (setting.regexTrigger && triggerRegex.test(messageText)) {
                             const fmtCondition = parseInt(seal.format(ctx, `{${triggerCondition}}`));
                             if (fmtCondition === 1) {
-                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '非指令' });
+                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '非指令', cause: 'regex' });
                                 return;
                             }
                         }

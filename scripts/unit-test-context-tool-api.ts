@@ -93,12 +93,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(text.includes('msg_id=m3'), 'read_raw 事件头应带消息 ID');
     },
 
-    async testContextToolApiGrepByTimeAscending() {
+    async testContextToolApiGrepByTimeDescending() {
         const service = await seed('QQ:tool-grep-time', 12);
         const text = grepRawForTool(service, { pattern: 'needle', max_hits: 10 } as any, (at: number) => `T${at}`);
-        assert.ok(text.includes('按时间升序'));
+        assert.ok(text.includes('按时间降序'));
         assert.ok(text.includes('msg_id=m3'));
-        assert.ok(text.indexOf('e:3 ') < text.indexOf('e:12 '), '命中应按时间（seq）升序输出');
+        assert.ok(text.indexOf('e:12 ') < text.indexOf('e:3 '), '命中应按时间（seq）降序输出，最新在前');
     },
 
     testContextToolApiFormatEmptyGrep() {

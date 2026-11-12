@@ -2,6 +2,8 @@
 import { savePurposeModelOverrides } from "../config/apply/model";
 import Config from "../config/config";
 import { archiveControllerFor } from "../context/compact/session_runtime";
+import { planAndWriteInjections } from "../context/injection_plan";
+import type { InjectionSystemMessage } from "../context/injection_plan";
 import { getHost } from "../core/host";
 import { setAgentResolver } from "../core/ports/agent_registry";
 import Logger from "../logger";
@@ -88,11 +90,18 @@ export default class Agent {
         this.subAgents = [];
     }
 
+    /**
+     * 本轮请求要带的工具 schema。
+     *
+     * 前缀缓存（#163 R1）：开启原生 function calling 时恒返回同一份三元素数组（`Tool.getNativeRequestTools`
+     * 已按模块级缓存复用引用），会话级工具开关**不再**影响它；工具可用性由执行期判定
+     * （`tool/executor.ts`）。关闭 STATUS 或走提示词工程模式时返回 null（`body.tools` 键不出现，
+     * 这是显式配置路径，不属于逐轮漂移）。
+     */
     getRequestTools(session?: Session): ToolInfo[] | null {
         if (!session) return null;
         if (!Config.tool.STATUS || Config.tool.PROMPT_ENGINEERING) return null;
         return Tool.getNativeRequestTools(session);
-        return null;
     }
 
     /**
@@ -125,6 +134,67 @@ export default class Agent {
         } catch (e) {
             log.warning('[ctx-cost] 记忆结算失败（不影响本轮回复）: ' + (e instanceof Error ? e.message : String(e)));
         }
+    }
+
+    /**
+     * 每轮注入规划（#163 PR-06 接线）：构造 InjectionContext → 跑 provider → 写注入块。
+     *
+     * 调用点必须满足两个前提：
+     * 1. 在 `handleMessages` **之前**（`compileV2Request` 按当前 `snapshot()` 渲染块，写晚了本轮看不见）；
+     * 2. 在 `archive?.beginRequest()` **之前**（writer 的预算闸自己会调 `archive.beforeRequest`，
+     *    随后 `beginRequest()` 清掉那份快照，由编译钩子用真实 L 重建，两条归档路径不打架）。
+     *
+     * 任何异常都在这里吞掉：注入是增强项，绝不能因为它打断用户这一轮的回复。
+     * （内置 provider 在 `optional !== false` 时才上抛到此处，仍只记观测与日志。）
+     */
+    private async planInjections(
+        session: Session,
+        ctx: seal.MsgContext,
+        systemMessage: InjectionSystemMessage,
+        tools: unknown[] | undefined,
+        modelName: string,
+    ): Promise<void> {
+        try {
+            await planAndWriteInjections({
+                ctx,
+                session,
+                systemMessage,
+                tools,
+                modelName,
+                // 上次请求真正发送到的最大 seq（首次为 0）
+                lastSentSeq: session.injectionAnchorSeq,
+            });
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            session.notePrefixObservation?.('injection-plan-failed', { message });
+            log.warning(`[inject] 注入规划失败（本轮不注入，不影响回复）：${message}`);
+        }
+    }
+
+    /**
+     * 请求成功发出后推进注入锚点（#163 D3b）：`= 本轮编译覆盖到的最大 seq`。
+     *
+     * 用 `Math.max` 单调推进，不允许回退：归档可能让 `lastSelectedSeq` 变小，一旦回退，
+     * 下一轮的块会锚到已发送区的中间，破坏 R1（前缀不变性）。
+     */
+    private markInjectionSent(session: Session): void {
+        const stats = session.contextV2?.lastCompile?.();
+        const lastSelectedSeq = stats ? Math.max(0, Math.floor(Number(stats.lastSelectedSeq) || 0)) : 0;
+        if (lastSelectedSeq <= 0) return;
+        session.injectionAnchorSeq = Math.max(session.injectionAnchorSeq, lastSelectedSeq);
+    }
+
+    /**
+     * 请求未发出/失败时推进注入锚点（#163 D3b 要求）：`= max(当前值, head.nextSeq - 1)`。
+     *
+     * `nextSeq - 1` 是"已入库的最新一条"。块锚在它之后仍落在新增历史的尾部，
+     * 因此即便本轮请求没发出去，下一轮的渲染位置依旧满足前缀不变性（过近似安全、欠近似才坏）。
+     */
+    private advanceInjectionAnchorOnFailure(session: Session): void {
+        const head = session.contextV2?.head?.();
+        if (!head) return;
+        const newest = Math.max(0, Math.floor(Number(head.nextSeq) || 0) - 1);
+        session.injectionAnchorSeq = Math.max(session.injectionAnchorSeq, newest);
     }
 
     /**
@@ -313,6 +383,9 @@ export default class Agent {
             await session.flushNotices();
             // L2 记忆结算（P1-3）：三条件满足时把窗口外原文总结进长期记忆（有界、失败退避、不阻塞回复）
             await this.settleBacklog(session);
+            // #163 PR-06：本轮注入必须在编译（handleMessages）之前写入，且早于 beginRequest
+            //（writer 的预算闸自己会调 archive.beforeRequest，随后 beginRequest 清快照由编译钩子重建）
+            await this.planInjections(session, ctx, systemMessage, toolInfos || [], modelName);
             // v7 归档：编译前按 T≥L 硬切（零 LLM）；编译钩子里拿到 L 后触发 beforeRequest
             const archive = archiveControllerFor(session);
             archive?.beginRequest();
@@ -322,7 +395,6 @@ export default class Agent {
                 noImages: handled.imageRoleDegraded || handled.payloadTries > 0,
                 excludeImageIds: handled.excludeImageIds,
                 model: Model.getChatModel('chat') || undefined,
-                runtimeText: promptParts.runtime,
                 trace: imageTrace,
                 archiveHooks: archive ? { beforeCompile: info => archive.beforeRequest(info) } : undefined,
             });
@@ -337,11 +409,17 @@ export default class Agent {
                         identity: session.quotaIdentity(),
                         maxTokens: Number((Model.getBodyDefaultsFor('chat') as any)?.max_tokens) || 0,
                     },
+                    // #163 REQ-D9-03：把本轮 usage 记进会话窗口（缓存命中率观测）
+                    onUsage: usage => session.noteCacheUsage(usage),
                 });
                 // 主对话请求已发出：并发启动总结（按切后 T 决定范围，不阻塞回复）
                 archive?.afterRequestSent();
+                // #163 PR-06：请求真的发出去了，才把注入锚点推进到本轮编译覆盖的最大 seq
+                this.markInjectionSent(session);
                 turn = await request;
             } catch (e) {
+                // #163 PR-06：本轮请求未发出/失败，锚点仍要推进到"已入库的最新一条"
+                this.advanceInjectionAnchorOnFailure(session);
                 if (e instanceof StopError) return;
                 // 用量限制：不重试、不切模型，直接结束本轮（提示只发一次，经 notifyOnce 节流）
                 if (e instanceof QuotaExceededError) {
@@ -717,6 +795,8 @@ export default class Agent {
             try {
                 const imageTrace = createImageTrace();
                 lastTrace = imageTrace;
+                // #163 PR-06：注入必须先于编译（handleMessages）写入，且早于 beginRequest
+                await this.planInjections(session, ctx, systemMessage, undefined, modelName);
                 const archive = archiveControllerFor(session);
                 archive?.beginRequest();
                 const messages = await handleMessages(ctx, session, this.isMultimodalChat(), undefined, systemMessage, modelName, {
@@ -724,7 +804,6 @@ export default class Agent {
                     noImages: h.imageRoleDegraded || h.payloadTries > 0,
                     excludeImageIds: h.excludeImageIds,
                     model: Model.getChatModel('chat') || undefined,
-                    runtimeText: parts.runtime,
                     trace: imageTrace,
                     archiveHooks: archive ? { beforeCompile: info => archive.beforeRequest(info) } : undefined,
                 });
@@ -732,10 +811,18 @@ export default class Agent {
                 const newId = await streamService.startStream(messages, trace.runId, session.stopEvent, {
                     throwClassified: true,
                     quota: { identity: session.quotaIdentity() },
+                    // #163 REQ-D9-03：流式 usage 在 endStream 才拿得到，回调随 streamMeta 存活
+                    onUsage: usage => session.noteCacheUsage(usage),
                 });
-                if (!newId) return;
+                if (!newId) {
+                    // #163 PR-06：起流被拒（无 id）⇒ 请求没发出去，锚点推进到已入库最新一条
+                    this.advanceInjectionAnchorOnFailure(session);
+                    return;
+                }
                 // 流式请求已建立：并发启动总结（不阻塞后续轮询）
                 archive?.afterRequestSent();
+                // #163 PR-06：流已建立才推进注入锚点到本轮编译覆盖的最大 seq
+                this.markInjectionSent(session);
                 // stop 发生在 startStream 期间：结束刚建的新流并中止，避免轮询一个未被 stop 的流
                 if (session.stopVersion !== version) {
                     session.stream.id = newId;
@@ -745,6 +832,8 @@ export default class Agent {
                 id = newId;
                 break;
             } catch (e) {
+                // #163 PR-06：本轮起流未成功，锚点仍要推进到"已入库的最新一条"
+                this.advanceInjectionAnchorOnFailure(session);
                 if (e instanceof StopError) return;
                 // 用量限制：流式起流被拒 ⇒ 直接结束本轮（不重试、不切模型）
                 if (e instanceof QuotaExceededError) {

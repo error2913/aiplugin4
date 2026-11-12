@@ -12,7 +12,7 @@ import { logger } from "./logger";
 import { QuotaManager } from "./quota/manager";
 import type { Session } from "./session/session";
 import { wakeSession } from "./trigger/wake";
-import { SYSTEM_NAME } from "./utils/protocol";
+import { formatGap, SYSTEM_NAME } from "./utils/protocol";
 import { revive, TypeDescriptor } from "./utils/revive";
 import { applyLastMessageRef, getSessionCtxAndMsg } from "./utils/seal";
 import { fmtDate } from "./utils/string";
@@ -21,6 +21,46 @@ import { pickPrompt } from "./utils/timer_spec";
 
 
 const log = logger.withTag('timer');
+
+/**
+ * 定时器触发提示文本（纯函数，供单测直接驱动）。
+ * 不含"现在"的绝对时间——`[time]` 由编译层从 system 事件的 `at` 渲染（历史里时间只此一处）；
+ * 这里仅保留 set/target 等语义时间。`Triggered at` 已删除（与 `[time]` 重复）。
+ */
+export function renderTimerText(kind: 'target' | 'interval', params: {
+    set: number;
+    target?: number;
+    intervalSec?: number;
+    count?: number;
+    prompt: string;
+}): string {
+    if (kind === 'target') {
+        return `Your timer fired. Send this reply:
+Timer set at: ${fmtDate(params.set)}
+Target time: ${fmtDate(params.target || 0)}
+Prompt: ${params.prompt}`;
+    }
+    const sec = Math.max(0, Math.floor(params.intervalSec || 0));
+    const remain = params.count === -1 ? 'unlimited' : Math.max(0, (params.count || 0) - 1);
+    return `Your timer fired. Send this reply:
+Timer set at: ${fmtDate(params.set)}
+Interval: ${sec}s
+Remaining triggers: ${remain}
+Prompt: ${params.prompt}`;
+}
+
+/**
+ * 活跃时间（旧语义）提示文本（纯函数）：只给"距最近一条消息"的相对间隔，不给绝对时间。
+ * gap < 1h 时省略该行（避免噪声）。
+ */
+export function renderActiveHoursText(lastAtSec: number, nowSec: number): string {
+    const base = 'It is now your active window. Say something.';
+    if (!(lastAtSec > 0)) return base;
+    const gap = nowSec - lastAtSec;
+    if (gap < 3600) return base;
+    return `${base}\nIt has been ${formatGap(gap)} since the last message.`;
+}
+
 
 export class TimerInfo {
     static validKeys: (keyof TimerInfo)[] = ['sid', 'isPrivate', 'epId', 'set', 'target', 'interval', 'count', 'type', 'content', 'prompts', 'ruleId', 'modeTag'];
@@ -423,11 +463,11 @@ WAIT轮末时间：${fmtDate(t.target)}`;
                             // 一次性定时器此时尚未 removeTimer ⇒ 下一轮 tick 会重试（被限流不应消耗定时器）。
                             if (QuotaManager.checkChat({ sessionId: session.sessionId, userId: '' })) break;
 
-                            const s = `Your timer fired. Send this reply:
-Timer set at: ${fmtDate(set)}
-Target time: ${fmtDate(target)}
-Triggered at: ${fmtDate(Math.floor(Date.now() / 1000))}
-Prompt: ${pickPrompt(timer.prompts) || content}`;
+                            const s = renderTimerText('target', {
+                                set,
+                                target,
+                                prompt: pickPrompt(timer.prompts) || content,
+                            });
 
                             try {
                                 await session.context.addSystemUserMessage(s, SYSTEM_NAME.timer);
@@ -473,12 +513,12 @@ Prompt: ${pickPrompt(timer.prompts) || content}`;
                                 removeTimer(timer);
                             }
 
-                            const s = `Your timer fired. Send this reply:
-Timer set at: ${fmtDate(set)}
-Interval: ${fmtDate(interval)}
-Remaining triggers: ${count === -1 ? 'unlimited' : count - 1}
-Triggered at: ${fmtDate(Math.floor(Date.now() / 1000))}
-Prompt: ${pickPrompt(timer.prompts) || content}`;
+                            const s = renderTimerText('interval', {
+                                set,
+                                intervalSec: interval,
+                                count,
+                                prompt: pickPrompt(timer.prompts) || content,
+                            });
 
                             await session.context.addSystemUserMessage(s, SYSTEM_NAME.timer);
                             await session.chat(ctx, msg, '定时任务');
@@ -512,7 +552,7 @@ Prompt: ${pickPrompt(timer.prompts) || content}`;
                                     log.info(`${sid} 不在活跃时段内，跳过本次 activeTime 触发（下次 ${fmtDate(nextPoint)}）`);
                                     break;
                                 }
-                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '活跃时间', raw: { mode: 'active' } });
+                                await wakeSession(session, ctx, msg, { kind: 'mode', reason: '活跃时间', raw: { mode: 'active' }, cause: 'active-hours' });
                                 break;
                             }
 
@@ -533,14 +573,10 @@ Prompt: ${pickPrompt(timer.prompts) || content}`;
                             // 用量限制：重排已完成，这里只跳过提示与起轮（静默，不污染上下文）
                             if (QuotaManager.checkChat({ sessionId: session.sessionId, userId: '' })) break;
 
-                            const messages = session.context.messages;
-                            const lastMsg = messages[messages.length - 1] as any;
-                            const items = lastMsg?.contentItems || [];
-                            const lastTime = items[items.length - 1]?.time || 0;
-                            const lastTimePrompt = `Last message time: ${fmtDate(lastTime)}`;
-                            const s = `It is now your active window: ${fmtDate(Math.floor(Date.now() / 1000))}
-${lastTimePrompt}
-Say something.`;
+                            // 旧语义：只给相对间隔（绝对时间由 system 事件的 [time] 提供；"now"/"Last message time" 已删除）
+                            const lastAt = session.lastMessageAt();
+                            const nowSec = Math.floor(Date.now() / 1000);
+                            const s = renderActiveHoursText(lastAt, nowSec);
 
                             await session.context.addSystemUserMessage(s, SYSTEM_NAME.activeHours);
                             await session.chat(ctx, msg, '活跃时间');

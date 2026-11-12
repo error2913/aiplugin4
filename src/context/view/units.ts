@@ -8,11 +8,14 @@
 //   编译层只能整组选择/整组丢弃，不会拆成两个可选单元。
 // - 不完整组（设计 gap-review X1）：
 //   - call 无结果 → 仍为该 turn 的 `tool_group` 单元，`complete=false`，`missingCallIds` 列出缺结果的调用；
-//     编译层负责降级为"调用未完成"文本（不产生 tool_calls，避免请求 400）。
+//     **#163 REQ-D2-09 起**：未结算组（`settled=false`）编译层**不渲染**（渲染形态会随结果晚到而变化，
+//     写进已发送区就违反 R1），等结算后作为新单元追加在尾部。
 //   - orphan result（找不到同 turn/同 group 的 call）→ 单独的 `orphan_result` 文本型单元。
 // - 排序：按 `seq` 升序（`seq` 是会话内单调唯一序号）；乱序到达（例如结果先于调用落盘）不影响成组。
 // - 合并：相邻（原始 seq 连续）且 `origin` 相同的 user 事件合并为一个 user 单元；assistant / event
 //   各自单独成单元（v2 中 system 事件已是独立 kind，不再混进 user 单元）。
+//   **传 `anchorSeq` 时跨 anchor 不合并**（#163 REQ-D2-12）：否则下一轮新增 user 消息会让已发送的
+//   合并消息多出一段文本，字节变了 ⇒ 前缀失效。
 import type { ConversationEvent, ToolCallEvent, ToolResultEvent } from "../events";
 
 /** 单元类型：user / assistant / tool_group / event，以及"孤儿工具结果"文本型单元 */
@@ -32,6 +35,15 @@ export interface ConversationUnit {
     events: ConversationEvent[];
     /** 仅工具类单元可能为 false：工具组缺结果 / 孤儿结果（由编译层降级为文本） */
     complete: boolean;
+    /**
+     * 工具组是否**已结算**（#163 REQ-D2-09）：全部调用都有结果，或该 turn 之后已出现更晚的
+     * user/assistant 事件（说明模型不会再补结果）。非工具单元恒为 true。
+     *
+     * 为什么需要它：未结算组的渲染形态会随"结果晚到"而变 —— 若第 N 轮把它渲染成
+     * "调用未完成"文本，第 N+1 轮结果到齐后又渲染成真实 tool 消息，那么**已发送区**的字节
+     * 就被改写了（违反 R1）。因此未结算组**本轮不渲染**，等结算后作为**新单元追加在尾部**。
+     */
+    settled?: boolean;
     /** 工具类单元：产生这些事件的模型调用轮次 id */
     turnId?: string;
     /** 工具组：缺少结果的调用 id（编译层渲染为"调用未完成"） */
@@ -110,15 +122,27 @@ function sameOrigin(a: ConversationEvent, b: ConversationEvent): boolean {
  * 事件 → 单元数组（纯函数，无副作用）。
  *
  * 使用方式（编译层）：
- * `segmentUnits(applyVisibility(events, index))`。
+ * `segmentUnits(applyVisibility(events, index), { anchorSeq })`。
  * 单元顺序按 `fromSeq` 升序；工具组内部事件已按"调用→各自结果"的渲染顺序重排。
+ *
+ * `anchorSeq`（#163 REQ-D2-12，可选）：上次请求已发送到的最大 seq。
+ * **跨过 anchor 的相邻 user 事件不合并** —— 若合并，下一轮新增一条 user 消息会让"已发送区"
+ * 里那条合并后的 user 消息多出一段文本（字节变了 ⇒ 违反 R1）；不合并则新增事件恒成新单元，
+ * 已发送区逐字节不变。其他调用点（归档/投影/命令）不传该参数，行为与旧版完全一致。
  */
-export function segmentUnits(events: readonly ConversationEvent[]): ConversationUnit[] {
+export function segmentUnits(
+    events: readonly ConversationEvent[],
+    opts: { anchorSeq?: number } = {},
+): ConversationUnit[] {
     const sorted = dedupeAndSort(events);
+    const rawAnchor = Number(opts.anchorSeq);
+    const anchorSeq = Number.isFinite(rawAnchor) && rawAnchor > 0 ? Math.floor(rawAnchor) : 0;
 
     const callsByTurn = new Map<string, ToolCallEvent[]>();
     const resultsByTurnGroup = new Map<string, Map<string, ToolResultEvent[]>>();
     const simpleUnits: ConversationUnit[] = [];
+    /** 最后一次出现的 user/assistant 事件 seq（判工具组是否已结算，REQ-D2-09） */
+    let lastConversationalSeq = 0;
 
     for (const event of sorted) {
         if (event.kind === 'tool_call') {
@@ -142,22 +166,32 @@ export function segmentUnits(events: readonly ConversationEvent[]): Conversation
             continue;
         }
 
-        // user 合并：前一个单元也是 user、原始 seq 连续、origin 相同
+        // user 合并：前一个单元也是 user、原始 seq 连续、origin 相同、且不跨 anchor
         const last = simpleUnits[simpleUnits.length - 1];
         if (event.kind === 'user' && last && last.kind === 'user') {
             const previous = last.events[last.events.length - 1];
             const previousSeq = eventSeqOf(previous);
             const seq = eventSeqOf(event);
-            if (previousSeq !== null && seq !== null && seq === previousSeq + 1 && sameOrigin(previous, event)) {
+            // 跨 anchor = 前一条事件已在"上次已发送"范围内 ⇒ 合并会改写已发送字节，禁止合并
+            const crossesAnchor = anchorSeq > 0 && previousSeq !== null && previousSeq <= anchorSeq;
+            if (!crossesAnchor && previousSeq !== null && seq !== null && seq === previousSeq + 1 && sameOrigin(previous, event)) {
                 last.events.push(event);
                 last.toSeq = seq;
                 continue;
             }
         }
 
-        if (event.kind === 'user') simpleUnits.push(makeUnit('user', [event], true));
-        else if (event.kind === 'assistant') simpleUnits.push(makeUnit('assistant', [event], true));
-        else simpleUnits.push(makeUnit('event', [event], true));
+        if (event.kind === 'user') {
+            simpleUnits.push(makeUnit('user', [event], true));
+            const seq = eventSeqOf(event);
+            if (seq !== null) lastConversationalSeq = seq;
+        } else if (event.kind === 'assistant') {
+            simpleUnits.push(makeUnit('assistant', [event], true));
+            const seq = eventSeqOf(event);
+            if (seq !== null) lastConversationalSeq = seq;
+        } else {
+            simpleUnits.push(makeUnit('event', [event], true));
+        }
     }
 
     const toolUnits: ConversationUnit[] = [];
@@ -196,6 +230,10 @@ export function segmentUnits(events: readonly ConversationEvent[]): Conversation
         const unit = makeUnit('tool_group', ordered, missingCallIds.length === 0);
         unit.turnId = turnId;
         if (missingCallIds.length > 0) unit.missingCallIds = missingCallIds;
+        // REQ-D2-09 结算判定：结果齐全即结算；否则"该 turn 之后已出现更晚的 user/assistant 事件"
+        // 也算结算（模型已继续对话，不可能再补这批结果了）。
+        // 未结算组的渲染形态还会变（"调用未完成" → 真实 tool 消息）⇒ 编译层不渲染它。
+        unit.settled = unit.complete || unit.toSeq < lastConversationalSeq;
         toolUnits.push(unit);
 
         // 该 turn 内没有对应 call 的结果 → 孤儿结果单元
@@ -257,4 +295,43 @@ export function isToolUnit(unit: ConversationUnit): boolean {
 /** 是否为文本型单元（其余四类；孤儿结果也按文本渲染） */
 export function isTextualUnit(unit: ConversationUnit): boolean {
     return unit.kind !== 'tool_group';
+}
+
+// ---------------------------------------------------------------------------
+// 冻结/增量切分（#163 REQ-D2-11）
+// ---------------------------------------------------------------------------
+
+/** 冻结区切分结果 */
+export interface AnchorSlice {
+    /** 冻结区单元数（`units.slice(0, frozenCount)` 恒为已发送前缀） */
+    frozenCount: number;
+    /** 冻结区覆盖到的最大 seq（0 = 无冻结区） */
+    boundarySeq: number;
+}
+
+/**
+ * 按**渲染序**切「冻结区 / 增量区」（纯函数）。
+ *
+ * 判据必须是"此前累积的 max(toSeq) 不超过 anchorSeq"，**不能**逐条判 `unit.toSeq <= anchorSeq`
+ * 后 break —— 工具组的 `toSeq` 可能晚于其后单元的 `seq`（见文件头"工具组可能晚到"契约），
+ * 逐条判会把一个仍属于已发送区的单元误划进增量区。
+ */
+export function sliceAtAnchor(units: readonly ConversationUnit[], anchorSeq: number): AnchorSlice {
+    const raw = Number(anchorSeq);
+    if (!Number.isFinite(raw) || raw <= 0) return { frozenCount: 0, boundarySeq: 0 };
+    const anchor = Math.floor(raw);
+    let maxTo = 0;
+    let boundarySeq = 0;
+    let count = 0;
+    for (const unit of units) {
+        const to = Number(unit.toSeq);
+        // 只统计**已接受**单元的 max(toSeq)：`boundarySeq` 必须是冻结区的真实末尾，
+        // 否则把首个越界单元 toSeq 记进来会让调用方以为冻结区覆盖得更深。
+        const next = Number.isFinite(to) && to > maxTo ? to : maxTo;
+        if (next > anchor) break;
+        maxTo = next;
+        boundarySeq = maxTo;
+        count++;
+    }
+    return { frozenCount: count, boundarySeq };
 }

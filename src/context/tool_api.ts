@@ -21,6 +21,14 @@ export interface GrepRawToolParams {
     max_pages?: number;
     max_hits?: number;
     cursor?: string;
+    /** 事件发生时间下界（Unix 秒，闭区间；与 from_seq 语义独立） */
+    time_from?: number;
+    /** 事件发生时间上界（Unix 秒，闭区间） */
+    time_to?: number;
+    /** 发言人过滤（user 事件 uid，如 QQ:123） */
+    from_uid?: string;
+    /** 事件类型过滤（user/assistant/system/tool/event）；legacy 会话沿用旧 kind 语义 */
+    kind?: string;
 }
 
 function intOrUndefined(value: unknown): number | undefined {
@@ -31,6 +39,22 @@ function intOrUndefined(value: unknown): number | undefined {
 
 function boolOrFalse(value: unknown): boolean {
     return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+/**
+ * 工具的 kind 参数 → v2 事件 kind 列表。
+ * 工具层面向模型暴露的是 user/assistant/system/tool/event 五个 token：
+ * - `system` 对应账本里的 `event`（SystemEvent）；
+ * - `tool` 对应 `tool_call`（工具调用事件）；
+ * - 其余原样。
+ * 单值字符串，保持 schema 简单；无法识别时返回 undefined（= 不过滤）。
+ */
+function normalizeV2Kinds(raw: unknown): string[] | undefined {
+    const token = String(raw ?? '').trim().toLowerCase();
+    if (!token) return undefined;
+    const alias: Record<string, string> = { system: 'event', tool: 'tool_call', tool_result: 'tool_result' };
+    const kind = alias[token] || token;
+    return ['user', 'assistant', 'tool_call', 'tool_result', 'event'].includes(kind) ? [kind] : undefined;
 }
 
 export function parseReadCursor(raw: unknown): ReadCursor | null {
@@ -96,7 +120,7 @@ export function formatReadRawResult(result: ReadRawResult, formatTime?: RawTimeF
 /** 格式化 grep_raw 结果（命中片段 + 时间/消息 ID + read_raw 指针 + 翻页游标） */
 export function formatGrepRawResult(pattern: string, result: GrepRawResult, formatTime?: RawTimeFormatter): string {
     const lines: string[] = [];
-    lines.push(`grep_raw ${pattern}：命中 ${result.hits.length} 条（本页按时间升序）${result.exhausted ? '（已扫描完）' : '（还有更多，可传 cursor 继续）'}`);
+    lines.push(`grep_raw ${pattern}：命中 ${result.hits.length} 条（本页按时间降序，最新在前）${result.exhausted ? '（已扫描完）' : '（还有更多，可传 cursor 继续）'}`);
     for (const hit of result.hits) {
         const time = fmtRawTime(formatTime, hit.at);
         const meta = `${time ? ` | ${time}` : ''}${hit.msgId ? ` | msg_id=${hit.msgId}` : ''}`;
@@ -137,6 +161,10 @@ export function grepRawForTool(service: ContextService, params: GrepRawToolParam
         regex: boolOrFalse(params.regex),
         fromSeq: intOrUndefined(params.from_seq),
         toSeq: intOrUndefined(params.to_seq),
+        timeFrom: intOrUndefined(params.time_from),
+        timeTo: intOrUndefined(params.time_to),
+        fromUid: typeof params.from_uid === 'string' && params.from_uid.trim() ? params.from_uid.trim() : undefined,
+        kinds: normalizeV2Kinds(params.kind),
         maxPages: intOrUndefined(params.max_pages),
         maxHits: intOrUndefined(params.max_hits),
         cursor,

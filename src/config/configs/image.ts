@@ -37,7 +37,8 @@ export default class ImageConfig {
         seal.ext.registerBoolConfig(ext, "图片被模型拒绝时自动降级", true, "模型报「不支持的图片」时定位并标记该图为「模型不可用」，改为文本标签重发本轮；不再让整个会话卡死", "图片");
         seal.ext.registerBoolConfig(ext, "图片降级通知", false, "图片被模型拒绝并自动降级时，用 ctx.notice 告知骰主", "图片");
         // 主对话三段注入（方案 §9.4 / §10.5）：图床段默认开（承接旧 IMAGES 的图库文案）
-        seal.ext.registerBoolConfig(ext, "图床提示注入", true, "开启后主对话系统提示词注入图库/图床规则段（core:image-host）；仅在配置了后端图床或图床 MCP 时生效", "图片");
+        // #163 D1-07：门控改为**纯配置**（不再看后端图床/MCP 是否连接），否则连断会打断前缀缓存
+        seal.ext.registerBoolConfig(ext, "图床提示注入", true, "开启后在主对话系统提示词中固定注入图库规则段（core:image-host）；本开关只控制该段是否注入，与后端图床/MCP 是否连接无关，图库数量与 ID 由工具现场查询", "图片");
         seal.ext.registerIntConfig(ext, "图床提示预算", 600, "图床提示段字符预算（默认 600，受段硬上限 600 约束）", "图片");
     }
 

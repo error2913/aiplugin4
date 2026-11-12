@@ -16,8 +16,11 @@ import {
     readRaw,
     RecallError,
 } from '../src/context/recall';
+import type { ContextService } from '../src/context/service';
 import { ContextStore } from '../src/context/store';
 import type { ContextSnapshot } from '../src/context/store';
+import { grepRawForTool } from '../src/context/tool_api';
+import { normalizeUserId } from '../src/utils/target_id';
 
 const SID = 'QQ-Group:recall-test';
 
@@ -83,6 +86,39 @@ function needleText(i: number): string {
 
 function hitSeqs(result: { hits: { seq: number }[] }): number[] {
     return result.hits.map(hit => hit.seq);
+}
+
+/** 按 at 指定时间戳播种 user 事件（seq=1..count，at=seq*1000），用于 time_from/time_to 过滤 */
+async function seedWithAt(count: number): Promise<{ storage: FakeStorage; store: ContextStore }> {
+    const storage = installFakeHost();
+    const store = await ContextStore.open(SID);
+    const inputs: EventInput[] = [];
+    for (let i = 1; i <= count; i += 1) {
+        inputs.push({ ...userInput(`m${i}`, `m${i}`), at: i * 1000, recvAt: i * 1000 } as EventInput);
+    }
+    store.append(inputs);
+    const flushed = await store.flush();
+    assert.equal(flushed.ok, true, `seed flush 失败：${flushed.error ?? ''}`);
+    return { storage, store };
+}
+
+/** 混合事件播种：user(uid 交替)/assistant/system event/tool_call/tool_result，用于测 kind 与 from_uid 过滤 */
+async function seedMixed(): Promise<ContextStore> {
+    installFakeHost();
+    const store = await ContextStore.open(SID);
+    const inputs: EventInput[] = [
+        { kind: 'user', uid: 'QQ:1', msgId: 'a1', parts: [{ type: 'text', text: 'alpha-1' }] },
+        { kind: 'user', uid: 'QQ:2', msgId: 'a2', parts: [{ type: 'text', text: 'beta-2' }] },
+        { kind: 'assistant', msgId: 'r1', parts: [{ type: 'text', text: 'alpha-assistant' }] },
+        { kind: 'event', systemName: 'timer', parts: [{ type: 'text', text: 'alpha-event' }] },
+        { kind: 'tool_call', turnId: 't1', groupId: 'g1', callId: 'c1', name: 'web_search', args: '{"q":"alpha"}' },
+        { kind: 'tool_result', turnId: 't1', groupId: 'g1', callId: 'c1', name: 'web_search', parts: [{ type: 'text', text: 'alpha-tool-result' }] },
+        { kind: 'user', uid: 'QQ:1', msgId: 'a3', parts: [{ type: 'text', text: 'alpha-3' }] },
+    ] as EventInput[];
+    store.append(inputs);
+    const flushed = await store.flush();
+    assert.equal(flushed.ok, true, `seed flush 失败：${flushed.error ?? ''}`);
+    return store;
 }
 
 export const tests: Record<string, () => void | Promise<void>> = {
@@ -259,9 +295,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         await seedStore(600, needleText);
         const store = await reopen(128);
         const result = grepRaw(store, snapshotOf(store), 'needle', { maxHits: 100, maxPages: 10 });
-        assert.deepEqual(hitSeqs(result), [100, 200, 300, 400, 500, 600]);
-        assert.equal(result.hits[0].pointer, 'read_raw id=e:100');
-        assert.ok(result.hits[0].snippet.includes('needle-100'));
+        assert.deepEqual(hitSeqs(result), [600, 500, 400, 300, 200, 100], '命中按时间降序（最新在前，REQ-D5-02）');
+        assert.equal(result.hits[0].pointer, 'read_raw id=e:600');
+        assert.ok(result.hits[0].snippet.includes('needle-600'));
         assert.equal(result.exhausted, true);
     },
 
@@ -290,7 +326,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const store = await reopen(128);
         const snapshot = snapshotOf(store);
         const regex = grepRaw(store, snapshot, '^.*needle-\\d{3}$', { regex: true, maxHits: 100 });
-        assert.deepEqual(hitSeqs(regex), [100, 200, 300, 400, 500, 600]);
+        assert.deepEqual(hitSeqs(regex), [600, 500, 400, 300, 200, 100]);
         assert.throws(() => grepRaw(store, snapshot, '[', { regex: true }), (error: unknown) => {
             assert.ok(error instanceof RecallError);
             assert.equal((error as RecallError).code, 'INVALID_ARGUMENT');
@@ -305,7 +341,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         store.appendRecord({ kind: 'supersede', id: 'sp1', at: 101, dedupKey: 'u:m4', seq: 9 });
         store.appendRecord({ kind: 'summary', id: 'sm1', at: 102, epoch: 1, fromSeq: 1, toSeq: 6, text: '摘要' });
         const result = grepRaw(store, snapshotOf(store), 'p', { maxHits: 100 });
-        assert.deepEqual(hitSeqs(result), [1, 5, 6, 7, 8, 9, 10], 'redact(2,3)/supersede(4) 跳过；摘要覆盖的 1 仍可搜；输出按时间升序');
+        assert.deepEqual(hitSeqs(result), [10, 9, 8, 7, 6, 5, 1], 'redact(2,3)/supersede(4) 跳过；摘要覆盖的 1 仍可搜；输出按时间降序（最新在前）');
         assert.ok(String(result.note).includes('skipped 3 invisible events (epoch/redact/supersede)'));
     },
 
@@ -333,16 +369,16 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const store = await reopen(128);
         const result = grepRaw(store, snapshotOf(store), 'needle', { maxHits: 100, maxPages: 10 });
         assert.deepEqual(result.skippedPages, [2]);
-        const expected = [100, 200, 300, 400, 500, 600].filter(seq => !needleSeqsInPage2.has(seq)).sort((a, b) => a - b);
+        const expected = [100, 200, 300, 400, 500, 600].filter(seq => !needleSeqsInPage2.has(seq)).sort((a, b) => b - a);
         assert.ok(expected.length > 0 && expected.length < 6, '第 2 页应至少包含部分命中，用于验证跳过');
-        assert.deepEqual(hitSeqs(result), expected, '坏页范围内的命中缺失但其余命中保留');
+        assert.deepEqual(hitSeqs(result), expected, '坏页范围内的命中缺失但其余命中保留（按时间降序）');
     },
 
     async testContextRecallGrepBounds() {
         await seedStore(600, needleText);
         const store = await reopen(128);
         const result = grepRaw(store, snapshotOf(store), 'needle', { fromSeq: 300, toSeq: 400, maxHits: 100 });
-        assert.deepEqual(hitSeqs(result), [300, 400]);
+        assert.deepEqual(hitSeqs(result), [400, 300]);
         const narrow = grepRaw(store, snapshotOf(store), 'needle', { fromSeq: 300, toSeq: 350, maxHits: 100 });
         assert.deepEqual(hitSeqs(narrow), [300]);
         const empty = grepRaw(store, snapshotOf(store), 'needle', { fromSeq: 301, toSeq: 399, maxHits: 100 });
@@ -369,5 +405,55 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(reopened.getHead().archivedThrough, 2);
         const after = grepRaw(reopened, snapshotOf(reopened), '消息3', { maxHits: 10 });
         assert.deepEqual(hitSeqs(after), [3]);
+    },
+
+    async testContextRecallGrepTimeRange() {
+        const { store } = await seedWithAt(10);
+        const snapshot = snapshotOf(store);
+        const range = grepRaw(store, snapshot, 'm', { timeFrom: 3000, timeTo: 6000, maxHits: 100 });
+        assert.deepEqual(hitSeqs(range), [6, 5, 4, 3], 'time_from/time_to 按 event.at 过滤，且输出最新在前');
+        const andSeq = grepRaw(store, snapshot, 'm', { timeFrom: 3000, timeTo: 6000, fromSeq: 4, maxHits: 100 });
+        assert.deepEqual(hitSeqs(andSeq), [6, 5, 4], 'time 区间与 seq 区间语义独立、可 AND');
+        const onlyFrom = grepRaw(store, snapshot, 'm', { timeFrom: 9000, maxHits: 100 });
+        assert.deepEqual(hitSeqs(onlyFrom), [10, 9], '只给下界时等价于 at >= time_from');
+        assert.throws(() => grepRaw(store, snapshot, 'm', { timeFrom: 9000, timeTo: 1000 }), (error: unknown) => {
+            assert.ok(error instanceof RecallError);
+            assert.equal((error as RecallError).code, 'INVALID_ARGUMENT');
+            return true;
+        }, 'time_from > time_to 应报 INVALID_ARGUMENT');
+    },
+
+    async testContextRecallGrepFromUidNormalized() {
+        const store = await seedMixed();
+        const snapshot = snapshotOf(store);
+        // tool_raw 的 normalizeUidArg 用的就是这条规则：normalizeUserId(raw, platformOf(ctx))
+        assert.equal(normalizeUserId('2', 'QQ'), 'QQ:2', '裸 QQ 号应归一为 QQ:<号>');
+        const byUid = grepRaw(store, snapshot, 'a', { fromUid: 'QQ:2', maxHits: 100 });
+        assert.deepEqual(hitSeqs(byUid), [2], 'from_uid 只命中该发言人的 user 事件');
+        const viaNormalized = grepRaw(store, snapshot, 'a', { fromUid: String(normalizeUserId('2', 'QQ')), maxHits: 100 });
+        assert.deepEqual(hitSeqs(viaNormalized), [2], '归一侧的 uid 应能精确命中账本 uid');
+        const nonUser = grepRaw(store, snapshot, 'a', { fromUid: 'QQ:1', kinds: ['assistant'], maxHits: 100 });
+        assert.deepEqual(hitSeqs(nonUser), [], 'from_uid 只对 user 事件生效（与 assistant 过滤交集为空）');
+    },
+
+    async testContextRecallGrepKindAndToolAlias() {
+        const store = await seedMixed();
+        const snapshot = snapshotOf(store);
+        const assistant = grepRaw(store, snapshot, 'alpha', { kinds: ['assistant'], maxHits: 100 });
+        assert.deepEqual(hitSeqs(assistant), [3], 'kinds 只保留指定 kind');
+        const events = grepRaw(store, snapshot, 'alpha', { kinds: ['event'], maxHits: 100 });
+        assert.deepEqual(hitSeqs(events), [4], 'kinds=event 命中 SystemEvent');
+        const toolCalls = grepRaw(store, snapshot, 'alpha', { kinds: ['tool_call'], maxHits: 100 });
+        assert.deepEqual(hitSeqs(toolCalls), [5], 'kinds=tool_call 命中工具调用事件');
+        // 工具层 kind 别名：system → event、tool → tool_call（normalizeV2Kinds 在 tool_api）
+        const service = {
+            grep: (pattern: string, options: unknown) => grepRaw(store, snapshot, pattern, options as never),
+        } as unknown as ContextService;
+        const systemOut = grepRawForTool(service, { pattern: 'alpha', kind: 'system' });
+        assert.ok(systemOut.includes('kind=event'), 'kind=system 应映射到 event');
+        assert.ok(!systemOut.includes('kind=user'), 'kind=system 不得命中 user');
+        const toolOut = grepRawForTool(service, { pattern: 'alpha', kind: 'tool' });
+        assert.ok(toolOut.includes('kind=tool_call'), 'kind=tool 应映射到 tool_call');
+        assert.ok(systemOut.includes('降序，最新在前'), '命中头文案应写明按时间降序（REQ-D5-02）');
     },
 };

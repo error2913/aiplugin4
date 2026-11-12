@@ -37,6 +37,11 @@ export function validatePromptSection(section: PromptSection): string {
         if (section.maxChars !== undefined && (!Number.isFinite(section.maxChars) || section.maxChars <= 0)) {
             return `段 ${section.name} 的 maxChars 非法`;
         }
+        // #163 REQ-D1-15：runtime 通道随 D1c 一并移除；外部段若注册 runtime 会静默失效，
+        // 直接拒绝并给出替代方案（改 system 常量段或 D3 注入块）
+        if (section.channel === 'runtime') {
+            return `外部段不允许 runtime 通道（会破坏 R1 前缀，改注册为 system 常量段或注入块）：${section.name}`;
+        }
     } else if (section.name.startsWith('ext:')) {
         return `内置段不能使用 ext: 命名空间：${section.name}`;
     }

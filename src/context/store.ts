@@ -26,6 +26,7 @@ import {
     parseHead,
     serializeHead,
 } from "./head";
+import { isInjection } from "./injections";
 import { eventPageKey, headKey } from "./keys";
 import {
     buildEventPage,
@@ -192,6 +193,15 @@ export class ContextStore {
         }
     }
 
+    /**
+     * 事件 id 是否已在本会话出现过（REQ-D6-06 去重判定）。
+     * 只读既有去重集合（含已加载页；不新建持久化结构）。
+     * 注意：归档页被清理或去重上限（MAX_DEDUP_IDS）淘汰后可能丢失 ⇒ 引用展开"只写一次"是 best-effort。
+     */
+    hasEvent(eventId: string): boolean {
+        return !!eventId && this.dedup.has(eventId);
+    }
+
     private nextSeq(): number {
         return this.head.nextSeq;
     }
@@ -233,8 +243,12 @@ export class ContextStore {
             } as unknown as ConversationEvent;
             this.head.nextSeq = seq + 1;
             const tokens = Math.max(0, this.estimate(event));
-            this.head.unsummarizedTokens += tokens;
-            this.head.unarchivedTokens += tokens;
+            // #163 D3-13 第 1/4 处：注入块只进 activeInjectTokens（每轮现算，不落 head），
+            // 否则 T = unarchived + summary + activeInject 会把同一批 token 算两次 ⇒ 提前归档
+            if (!isInjection(event)) {
+                this.head.unsummarizedTokens += tokens;
+                this.head.unarchivedTokens += tokens;
+            }
             this.buffer.push(event);
             this.events.push(event);
             this.trackDedup(eventId);
@@ -269,7 +283,10 @@ export class ContextStore {
             this.head.archivedThrough = this.head.summarizedThrough;
             let unarchived = 0;
             for (const event of this.events) {
-                if (event.seq > this.head.archivedThrough) unarchived += Math.max(0, this.estimate(event));
+                // #163 D3-13 第 2/4 处：重算同样跳过注入块（口径必须与 append 一致）
+                if (event.seq > this.head.archivedThrough && !isInjection(event)) {
+                    unarchived += Math.max(0, this.estimate(event));
+                }
             }
             this.head.unarchivedTokens = unarchived;
         }
@@ -332,7 +349,10 @@ export class ContextStore {
         this.head.archivedThrough = target;
         let unarchived = 0;
         for (const event of this.events) {
-            if (event.seq > target) unarchived += Math.max(0, this.estimate(event));
+            // #163 D3-13 第 3/4 处：归档重算同样跳过注入块
+            if (event.seq > target && !isInjection(event)) {
+                unarchived += Math.max(0, this.estimate(event));
+            }
         }
         this.head.unarchivedTokens = unarchived;
         this.version++;

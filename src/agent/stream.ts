@@ -2,6 +2,7 @@
 import Config from "../config/config";
 import { logger } from "../logger";
 import { buildProviderBody, extractUsage, parseProviderResponse } from "../model/adapter";
+import type { NormalizedUsage } from "../model/adapter";
 import { ApiError, resolveEffectiveMaxTokens } from "../model/api_error";
 import Model, { ModelEntry } from "../model/model";
 import { requestModel } from "../model/provider";
@@ -14,7 +15,7 @@ import { TokenCalibration } from "../token_calibration";
 import { ToolCall } from "../tool/types";
 import { UsageManager } from "../usage";
 import { backendAuthHeaders, backendStatusHint } from "../utils/backend";
-import { estimateMessageTokens, estimateTextTokens, RequestMessage } from "../utils/message";
+import { estimateMessageTokens, estimateToolsTokens, RequestMessage } from "../utils/message";
 import { StopError, StopEvent, withTimeout } from "../utils/timeout";
 
 const log = logger.withTag('model');
@@ -86,7 +87,8 @@ function sanitizeRequestMessages(messages: any[]): any[] {
 
 /** 估算 messages + tools 的 raw token，并用模型校准系数预测是否超出「上下文最大token」 */
 function estimateRequestTokens(messages: any[], tools: any[]): number {
-    const toolsEstimate = tools && tools.length > 0 ? estimateTextTokens(JSON.stringify(tools)) : 0;
+    // #163 D8-05：同一 tools 引用命中缓存（原生路径 tools 逐轮恒定），避免每轮重复 stringify
+    const toolsEstimate = estimateToolsTokens(tools);
     // 与 handleMessages 的 applyTokenBudget 统一估算口径（文本 + tool_calls + tools 预留），
     // 避免两套口径不一致导致裁剪后请求体仍超限；多模态图片按固定开销而非 base64 原文估算
     return (messages || []).reduce((acc, m) => acc + estimateMessageTokens(m), 0) + toolsEstimate;
@@ -114,6 +116,13 @@ export interface QuotaRequestOpts {
     maxTokens?: number;
 }
 
+/**
+ * usage 观测回调（#163 REQ-D9-03）：把归一化 usage 抛给会话，用于统计缓存命中率。
+ *
+ * 与非流式同源（都来自 `extractUsage`），所以两条路径的命中率口径一致。
+ */
+export type UsageObserver = (usage: NormalizedUsage) => void;
+
 export class streamService {
     private static streamMeta = new Map<string, {
         modelName: string;
@@ -125,8 +134,10 @@ export class streamService {
         handle?: QuotaReserveHandle;
         /** 起流时刻的归属身份（endStream 兜底归因；不会被后续 chat 覆盖） */
         identity?: QuotaIdentity;
+        /** #163 REQ-D9-03：usage 观测回调（流式命中在 endStream 才拿得到） */
+        onUsage?: UsageObserver;
     }>();
-    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean; quota?: QuotaRequestOpts }): Promise<string> {
+    static async startStream(messages: any[], runId: string = '', stopEvent?: StopEvent, opts?: { throwClassified?: boolean; quota?: QuotaRequestOpts; onUsage?: UsageObserver }): Promise<string> {
         const { TIMEOUT: timeout } = Config.base;
         const { STREAM: streamUrl, STREAM_TOKEN: streamToken } = Config.backend;
         const model = Model.getChatModel('chat');
@@ -196,6 +207,7 @@ export class streamService {
                     startedAt: Date.now(),
                     handle: quotaHandle ?? undefined,
                     identity: opts?.quota?.identity,
+                    onUsage: opts?.onUsage,
                 });
                 // 句柄已移交 streamMeta（endStream 负责释放），此处清空避免 catch 重复释放
                 quotaHandle = null;
@@ -220,7 +232,7 @@ export class streamService {
     /**
      * 非流式对话请求（从旧 src/service.ts 的 sendChatRequest 移植，改用新 Model 配置）
      */
-    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse, stream?: boolean, quota?: QuotaRequestOpts }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
+    static async sendChatRequest(messages: RequestMessage[], tools: any[], tool_choice: string, runId: string = '', explicitModel?: ModelEntry | null, stopEvent?: StopEvent, opts?: { throwClassified?: boolean, use?: ChatModelUse, stream?: boolean, quota?: QuotaRequestOpts, onUsage?: UsageObserver }): Promise<{ content: string, tool_calls: ToolCall[], reasoning_content?: string }> {
         const model = explicitModel ?? Model.getChatModel('chat');
         if (!model) {
             log.error('未找到可用的对话模型');
@@ -257,6 +269,7 @@ export class streamService {
                 rawEstimateTokens: rawEstimate,
                 use: forUse,
                 ...(opts?.quota ? { quotaEst, quotaIdentity: opts.quota.identity } : {}),
+                ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
             });
             const response = parseProviderResponse(model.provider, data, model.api);
             if (response.choices && response.choices.length > 0) {
@@ -392,6 +405,12 @@ export class streamService {
                             );
                         } catch (error) {
                             log.warning(`流式配额记账异常（已忽略）：${error instanceof Error ? error.message : String(error)}`);
+                        }
+                        // #163 REQ-D9-03：usage 观测（流式只有一个上报点，就在这里）
+                        try {
+                            meta?.onUsage?.(usage);
+                        } catch {
+                            // 观测失败静默
                         }
                     }
                 }

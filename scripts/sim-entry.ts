@@ -9,6 +9,7 @@ import { Context, estimateContextMessagesTokens } from "../src/context/context";
 import { Session } from "../src/session/session";
 import { SessionService } from "../src/session/session_service";
 import Agent from "../src/agent/agent";
+import { serializeSession } from "../src/session/persistence";
 import { buildContent, handleMessages } from "../src/utils/message";
 import { MemoryManager } from "../src/memory/manager";
 import { UsageManager } from "../src/usage";
@@ -147,11 +148,18 @@ async function scenarioColdIngest() {
 
     const N = 1000;
     console.log(`  · 灌消息前：stateOf=${session.stateOf(Date.now(), { touch: false })}，standby=${session.setting.aiEnabled}，GLOBAL_STANDBY=${Config.base.GLOBAL_STANDBY}`);
+    // blob 体积是**锯齿**的：窗口移出（trimToWindow）成批砍掉最旧一段，所以任一时刻的瞬时值
+    // 取决于"采样点刚好落在齿谷还是齿峰"。要比"是否与消息总量解耦"，必须比**峰值**，
+    // 否则两批各采一个点纯看运气（#163 就曾因 `[time]` 删除让每条约短 20 字、窗口塞进 3 倍条目，
+    // 恰好在第二批采到齿峰 ⇒ 断言假红，而峰值其实是平的）。
+    let peakBatch = 0;
+    const notePeak = () => { peakBatch = Math.max(peakBatch, serializeSession(session).length); };
     for (let i = 0; i < N; i++) {
         const text = i % 37 === 0
             ? `第${i}条超长消息${'内容'.repeat(400)}`   // 制造单条超长，触发冷态截断
             : `第${i}条群聊消息，大家在聊一些日常话题${'补充'.repeat(i % 5)}`;
         await ctx.addUserMessage(makeCtx(sid), text, `QQ:${1000 + (i % 20)}`, `msg${i}`);
+        notePeak();
     }
     // 冷态入库走 save(true)（合并写，5 秒窗口）。真实环境里这 5 秒会被后续消息自然跨过；
     // 这里显式补一次 save() 把待写内容落盘，否则量到的"落盘 0 次"只是节流还没到期。
@@ -165,17 +173,19 @@ async function scenarioColdIngest() {
     // 验收数字
     check('辅助 LLM 调用为 0（冷态零 LLM）', llmDelta === 0, `本次新增 LLM 调用 ${llmDelta} 次`);
     check('落盘次数 ≤ 50 次/1000 条', setDelta <= 50, `实际落盘 ${setDelta} 次（原实现为 ${N} 次）`);
-    // 体积上界：用"灌两倍消息后 blob 是否仍近似不变"来证明**与消息总量解耦**（单纯比原文长度没有意义）
-    const blob1 = storage.peek(`session_${sid}`).length;
+    // 体积上界：用"再灌一倍消息后 blob 峰值是否仍近似不变"来证明**与消息总量解耦**
+    // （单纯比原文长度或比两个瞬时值都没有意义，见上面锯齿说明）
+    const blob1 = peakBatch;
     const before2 = { llm: llm.calls };
     for (let i = 0; i < N; i++) {
         await ctx.addUserMessage(makeCtx(sid), `追加第${i}条群聊消息，继续聊日常话题${'补充'.repeat(3)}`, `QQ:${1000 + (i % 20)}`, `more${i}`);
+        notePeak();
     }
     session.save();
     const blob2 = storage.peek(`session_${sid}`).length;
     check('再灌 1000 条后 session 体积仍近似不变（与消息总量解耦）',
-        blob2 <= blob1 * 1.5 && (llm.calls - before2.llm) === 0,
-        `blob ${blob1} → ${blob2} 字（消息总量 1000 → 2000 条），期间 LLM 调用 ${llm.calls - before2.llm} 次`);
+        peakBatch <= blob1 * 1.5 && (llm.calls - before2.llm) === 0,
+        `blob 峰值 ${blob1} → ${peakBatch} 字（末值 ${blob2}；消息总量 1000 → 2000 条），期间 LLM 调用 ${llm.calls - before2.llm} 次`);
     check('窗口移出确实生效（raw 分片存在）', (session as any).rawSeq > 0,
         `rawSeq=${(session as any).rawSeq}，raw 分片键 ${storage.keyLen(`session_${sid}:raw:`)} 个`);
 

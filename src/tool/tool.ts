@@ -148,9 +148,10 @@ export default class Tool {
         }
     }
 
-    /** 清空工具注册表（用于测试/热重载） */
+    /** 清空工具注册表（用于测试/热重载）；同时失效 `getNativeRequestTools` 的缓存 */
     static reset() {
         clearToolMap();
+        Tool.nativeToolsCache = null;
     }
 
     /**
@@ -414,18 +415,45 @@ export default class Tool {
         }));
     }
 
-    /** 原生 function calling 模式：只暴露引导工具 */
-    static getNativeRequestTools(session: Session): ToolInfo[] | null {
-        const tools = NATIVE_TOOL_NAMES
-            .map(name => toolMap[name])
-            .filter(Boolean)
-            .filter(t => session.toolState?.[t.toolInfo.function.name])
-            .filter(t => t.sessionType === 'any' || t.sessionType === session.sessionType)
-            .map(t => t.toolInfo);
-        return tools.length > 0 ? tools : null;
+    /**
+     * 原生 function calling 模式：**恒定**暴露 `NATIVE_TOOL_NAMES` 三个元工具。
+     *
+     * 前缀缓存（#163 R1）：`tools` 位于请求体**最前端**，一旦它随会话状态变化，断点之后的
+     * 整个请求体都作废——代价 ≈ 整个 `|B_k|`，比 system 中部漂移更严重。
+     * 因此这里**不再**按 `session.toolState` / 会话类型 / 平台过滤：工具是否可用由执行期
+     * （`tool/executor.ts` 的四类失败码 `not_found`/`not_enabled`/`platform`/`session_type`）判定。
+     *
+     * **永不返回 null**：`stream.ts` 用 `if (tools && tools.length > 0) body.tools = tools`，
+     * 返回 null/空数组会让 `body.tools` 这个 **键整个消失**（结构级断裂，adapter 会走无工具分支），
+     * 比"值变化"更难排查。缺项只记 warning，不改变顺序与条数（缺项属启动期 bug）。
+     *
+     * 结果按模块级缓存复用同一数组引用：`JSON.stringify` 的字节恒定，前缀逐字节稳定。
+     */
+    static getNativeRequestTools(_session?: Session): ToolInfo[] {
+        if (!Tool.nativeToolsCache) {
+            const list: ToolInfo[] = [];
+            for (const name of NATIVE_TOOL_NAMES) {
+                const tool = toolMap[name];
+                if (!tool) {
+                    log.warning(`元工具未注册（前缀恒定性依赖它）：${name}`);
+                    continue;
+                }
+                list.push(tool.toolInfo);
+            }
+            Tool.nativeToolsCache = list;
+        }
+        return Tool.nativeToolsCache;
     }
 
-    /** 提示词工程模式：返回需要完整参数说明的元工具（平台过滤） */
+    /** `getNativeRequestTools` 的模块级缓存（同一数组引用 ⇒ JSON 字节恒定） */
+    private static nativeToolsCache: ToolInfo[] | null = null;
+
+    /**
+     * 提示词工程模式：返回需要完整参数说明的元工具（平台过滤）。
+     *
+     * 仅 PE 模式用于 `core:tool-call-format` 之外的"元工具参数说明"注入；原生 function calling
+     * 模式走 `getNativeRequestTools`（恒定三个），两条路径的工具面口径不同，别混用。
+     */
     static getMetaToolInfos(session: Session, platform?: string): ToolInfo[] {
         return META_TOOL_NAMES
             .map(name => toolMap[name])
@@ -436,4 +464,18 @@ export default class Tool {
             .map(t => t.toolInfo);
     }
 
+}
+
+/** 元工具 schema 的稳定 JSON（不含任何运行时值；#163 D8-04/D8-05） */
+let nativeToolsJsonCache: string | null = null;
+export function nativeRequestToolsJson(): string {
+    if (nativeToolsJsonCache === null) {
+        nativeToolsJsonCache = JSON.stringify(Tool.getNativeRequestTools());
+    }
+    return nativeToolsJsonCache;
+}
+
+/** `Tool.reset()` 时同步失效 JSON 缓存（测试/热重载） */
+export function resetNativeToolsJsonCache(): void {
+    nativeToolsJsonCache = null;
 }

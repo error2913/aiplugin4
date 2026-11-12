@@ -1,6 +1,9 @@
-// MCP 服务器 instructions 段（可选、默认关闭）：由 MCP 模块通过 provider 注入文本。
-// 定位：runtime 通道 + 低权威 + 外部清洗，不污染稳定 system 前缀；未开启或无 provider 时为空。
-import type { PromptSection } from '../types';
+// MCP 服务器 instructions：由 MCP 模块通过 provider 注入文本。
+//
+// #163 D1c（PR-08）：原 `tool:mcp-instructions` runtime 段（`registerMcpSections`）已删除。
+// MCP instructions 现在改由 D3 的 `kind:'mcp'` 注入块承载（`src/prompt/injections/mcp.ts`），
+// 本文件只保留「provider 注册 + 渲染 + 上限常量」这层纯函数，供注入 provider 复用。
+// 好处：说明文本落到增量注入块（请求体尾部之后），既保住稳定前缀，又保留低权威/外部清洗语义。
 
 /** 单条 MCP instructions：server 名 + 文本 */
 export interface McpInstructionsEntry {
@@ -21,6 +24,11 @@ export function setMcpInstructionsProvider(next: McpInstructionsProvider | null)
 /** 清空 provider（测试 / JS 重载用） */
 export function resetMcpInstructionsProvider(): void {
     provider = null;
+}
+
+/** #163 D3：注入 provider 读取当前 instructions 提供者（未注册时返回 null，不发起网络请求） */
+export function getMcpInstructionsProvider(): McpInstructionsProvider | null {
+    return provider;
 }
 
 /** 单服务器上限与总量上限（字符） */
@@ -48,23 +56,4 @@ export function renderMcpInstructions(entries: McpInstructionsEntry[]): string {
         lines.push(block);
     }
     return lines.join('\n\n');
-}
-
-export function registerMcpSections(): PromptSection[] {
-    return [
-        {
-            name: 'tool:mcp-instructions',
-            order: 950,
-            channel: 'runtime',
-            sanitize: 'external',
-            maxChars: 2500,
-            cache: {
-                deps: c => {
-                    if (!provider) return ['off'];
-                    return [c.platform, provider(c.platform).map(entry => `${entry.server}:${entry.instructions.length}`).join(',')];
-                },
-            },
-            build: c => (provider ? renderMcpInstructions(provider(c.platform)) : ''),
-        },
-    ];
 }

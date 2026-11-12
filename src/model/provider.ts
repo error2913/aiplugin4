@@ -9,6 +9,7 @@ import { StopError, StopEvent, withTimeout } from "../utils/timeout";
 import { fetchData, FetchDataType } from "../utils/web";
 
 import { extractUsage } from "./adapter";
+import type { NormalizedUsage } from "./adapter";
 import { isAnthropicMessages, isOpenAiResponses, resolveApiDialect } from "./api_dialect";
 import { ApiError, ApiErrorKind, classifyApiError } from "./api_error";
 import { resolveBaiduToken } from "./baidu_token";
@@ -60,6 +61,11 @@ export interface RequestModelOptions {
     quotaEst?: number;
     /** 配额归属（会话/用户）；缺省时只记「总量」维度（外部 API 路径） */
     quotaIdentity?: QuotaIdentity;
+    /**
+     * usage 上报回调（#163 REQ-D9-03）：请求**成功**后把归一化 usage 抛给调用方，
+     * 供会话窗口统计缓存命中率。回调异常一律吞掉（观测失败不得影响已成功的请求）。
+     */
+    onUsage?: (usage: NormalizedUsage) => void;
 }
 
 /** request 覆盖（由「模型规则」[request] 模板解析而来，默认无） */
@@ -175,6 +181,12 @@ export async function requestModel(url: string, apiKey: string, body: any, optio
                             );
                         } catch (error) {
                             logger.warning(`配额记账异常（已忽略，不重试）：${error instanceof Error ? error.message : String(error)}`);
+                        }
+                        // #163 REQ-D9-03：usage 观测回调（异常不得冒泡，否则会把已成功的请求归成 ApiError 重试）
+                        try {
+                            options.onUsage?.(usage);
+                        } catch {
+                            // 观测失败静默
                         }
                     }
                 }

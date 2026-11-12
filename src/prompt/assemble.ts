@@ -15,7 +15,42 @@ export const GLOBAL_PROMPT_BUDGET_CHARS = 0;
 /** 截断占位符 */
 const ELLIPSIS = '…';
 
-/** 组装 hook：可整体改写 system/runtime 文本（外部插件扩展点） */
+/**
+ * 可选段全局丢弃集合缓存：key = 注册签名（段名/顺序/上限/可选性），
+ * 同一注册表只算一次 ⇒ 丢弃集合不会因文本抖动而改变（#163 REQ-D1-15）。
+ */
+const optionalDropCache = new Map<string, Set<string>>();
+
+function frozenOptionalDropSet(
+    kept: Array<{ section: PromptSection; text: string }>,
+    dropSig: string,
+): Set<string> {
+    const cached = optionalDropCache.get(dropSig);
+    if (cached) return cached;
+    let totalChars = kept.reduce((sum, item) => sum + item.text.length, 0);
+    const dropped = new Set<string>();
+    const droppable = kept
+        .filter(item => item.section.optional)
+        .slice()
+        .sort((a, b) => b.section.order - a.section.order);
+    for (const item of droppable) {
+        if (totalChars <= GLOBAL_PROMPT_BUDGET_CHARS) break;
+        totalChars -= item.text.length;
+        dropped.add(item.section.name);
+        log.warning(`提示词超出全局预算，已丢弃可选项：${item.section.name}`);
+    }
+    // 上界保护：注册签名极少变化，仍保留 LRU 式上限防止外部插件反复注册撑爆
+    if (optionalDropCache.size > 64) optionalDropCache.clear();
+    optionalDropCache.set(dropSig, dropped);
+    return dropped;
+}
+
+/**
+ * 组装 hook：可整体改写 system 文本（外部插件扩展点）。
+ *
+ * `runtime` 字段仅保留在签名里做兼容（#163 D1c 起 runtime 通道已移除）：
+ * hook 返回的 runtime 文本**不会生效**，只记一条 warning（REQ-D1-16）。
+ */
 export type PromptAssembleHook = (parts: { system: string; runtime: string }) => { system?: string; runtime?: string } | void;
 
 const hooks: PromptAssembleHook[] = [];
@@ -108,37 +143,39 @@ export async function assemblePrompt(ctx: PromptContext): Promise<PromptParts> {
         return { section, text: result.text, cache: result.cache };
     }));
 
-    // 外部插件段总量上限：超过则按 order 丢弃后续扩展段
+    // 扩展段总量判定用「注册期常量」（maxChars）而不是本轮实际字符数：
+    // 注册表不变 ⇒ 判定不变；否则外部段文本一抖动就会换掉 S（#163 REQ-D1-15）
+    const extensionCost = (section: PromptSection): number =>
+        Math.max(1, Math.floor(section.maxChars ?? EXTENSION_TOTAL_MAX_CHARS));
     let extensionChars = 0;
     const kept: Array<{ section: PromptSection; text: string; cache: SectionStat['cache'] }> = [];
     for (const item of built) {
         if (!item.text) continue;
         if (item.section.scope === 'extension') {
-            if (extensionChars + item.text.length > EXTENSION_TOTAL_MAX_CHARS) {
+            const cost = extensionCost(item.section);
+            if (extensionChars + cost > EXTENSION_TOTAL_MAX_CHARS) {
                 log.warning(`外部提示词段超出总预算已跳过：${item.section.name}`);
                 continue;
             }
-            extensionChars += item.text.length;
+            extensionChars += cost;
         }
         kept.push(item);
     }
 
-    // 可选全局预算：从 order 最大的 optional 段开始丢弃
-    let totalChars = kept.reduce((sum, item) => sum + item.text.length, 0);
+    // 可选全局预算：默认 0 = 关闭（#163 REQ-D1-15 要求保持 0）。
+    // 若未来启用，丢弃集合必须按**注册签名**冻结一次，不能每轮按实际字符数重算，否则 S 会漂移。
     if (GLOBAL_PROMPT_BUDGET_CHARS > 0) {
-        const droppable = kept
-            .filter(item => item.section.optional)
-            .slice()
-            .sort((a, b) => b.section.order - a.section.order);
-        for (const item of droppable) {
-            if (totalChars <= GLOBAL_PROMPT_BUDGET_CHARS) break;
-            const index = kept.indexOf(item);
-            if (index < 0) continue;
-            totalChars -= item.text.length;
-            kept.splice(index, 1);
-            log.warning(`提示词超出全局预算，已丢弃可选项：${item.section.name}`);
+        const dropSig = sections
+            .map(section => `${section.name}|${section.order}|${section.maxChars ?? ''}|${section.optional ? 1 : 0}`)
+            .join(',');
+        const dropped = frozenOptionalDropSet(kept, dropSig);
+        if (dropped.size > 0) {
+            const survivors = kept.filter(item => !dropped.has(item.section.name));
+            kept.length = 0;
+            for (const item of survivors) kept.push(item);
         }
     }
+
 
     const stats = kept.map(item => statOf(item.section, item.text, item.cache));
     const join = (channel: 'system' | 'runtime'): string => kept
@@ -147,14 +184,17 @@ export async function assemblePrompt(ctx: PromptContext): Promise<PromptParts> {
         .join('\n\n');
 
     let system = join('system');
-    let runtime = join('runtime');
+    const runtime = join('runtime');
 
     for (const hook of hooks) {
         try {
             const patched = hook({ system, runtime });
             if (patched && typeof patched === 'object') {
                 if (typeof patched.system === 'string') system = normalizeText(patched.system);
-                if (typeof patched.runtime === 'string') runtime = normalizeText(patched.runtime);
+                if (typeof patched.runtime === 'string') {
+                    // runtime 通道已移除：hook 改 runtime 不再进入请求体（#163 REQ-D1-14/16），只告警
+                    log.warning('onPromptAssemble 返回了 runtime 文本：runtime 通道已移除，忽略该文本');
+                }
             }
         } catch (error) {
             log.warning(`提示词组装 hook 执行失败已忽略：${error instanceof Error ? error.message : String(error)}`);

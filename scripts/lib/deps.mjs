@@ -126,6 +126,9 @@ const LAYER_RULES = [
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/(usage|block|timer)\.ts$/.test(f) },
     // 用量限制（配额）内核：只读 logger/host/utils/token_calibration，不摸 model/session
     { layer: 2, name: 'L2 能力', test: (f) => /^src\/quota\//.test(f) },
+    // #163 D3a：注入块契约是零 import 叶子（类型 + 常量 + 纯函数），必须显式标 L0，
+    // 否则会落到下面 `^src/context/` 的 L3 规则上，被 prompt/**（L1/L3）反向依赖时判为跨层违规
+    { layer: 0, name: 'L0 基础', test: (f) => /^src\/context\/injections\.ts$/.test(f) },
     { layer: 3, name: 'L3 领域', test: (f) => /^src\/(context|session|prompt|tool|agent|subagent)\//.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/(index|pipeline|trigger|changelog)\.ts$/.test(f) },
     { layer: 4, name: 'L4 装配', test: (f) => /^src\/cmd\//.test(f) },

@@ -9,7 +9,7 @@ export function registerCmdPrompt() {
     const cmd = new SubCmd('prompt');
     cmd.desc = '查看system prompt';
     cmd.help = `帮助:
-【.ai prompt】查看当前 system prompt 与 runtime 段，内容过长时仅记录到日志
+【.ai prompt】查看当前 system prompt（#163 D1c 起 runtime 通道已移除，不再有 runtime 段），内容过长时仅记录到日志
 【.ai prompt sections】查看 prompt 段统计（order/name/channel/chars/tokens/cache）`;
     cmd.priv = { priv: M };
     cmd.solve = async (scc: SubCmdContext) => {
@@ -22,6 +22,8 @@ export function registerCmdPrompt() {
             return ret;
         }
 
+        // #163 D1c：内置 runtime 段已清零，`parts.runtime` 恒为空串；
+        // 保留三元判断以兼容历史 hook/扩展残留（非空时才拼出 runtime 段，便于排障）。
         const text = parts.runtime
             ? `${parts.system}\n\n--- runtime ---\n${parts.runtime}`
             : parts.system;

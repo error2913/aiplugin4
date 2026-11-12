@@ -1,6 +1,7 @@
 // 插件入口：装配配置、模型、记忆、工具、命令与事件管线
 import Handlebars from "handlebars";
 
+import Agent from "./agent/agent";
 import { initAgents } from "./agent/agents";
 import { registerAgentApi } from "./agent/api";
 import { installAuxAgent } from "./agent/aux_agent_impl";
@@ -13,7 +14,9 @@ import { PrivilegeManager } from "./cmd/privilege";
 import { registerConfigAppliers } from "./config/apply";
 import { ext } from "./config/config";
 import Config from "./config/config";
+import { setConfigChangeListener } from "./config/hooks";
 import { STORAGE_VERSION } from "./config/static_config";
+import { VERSION as PLUGIN_VERSION } from "./config/static_config/meta";
 import { ContextService } from "./context/service";
 import { getHost, setHost } from "./core/host";
 import { setArchiveFactsSink } from "./core/ports/archive_facts";
@@ -24,13 +27,15 @@ import { knowledgeService } from "./memory/knowledge";
 import { MemoryService } from "./memory/service";
 import { MessagePipeline } from "./pipeline";
 import { reconcileRuleTimers } from "./pipeline/trigger_timer_impl";
+import { registerBuiltinInjectionProviders } from "./prompt/injections";
 import { installPromptMemorySource } from "./prompt/memory_source_impl";
 import { registerBuiltinSections } from "./prompt/sections";
 import { registerJudgePromptTextsImpl } from "./prompt/texts/en";
 import { QuotaManager } from "./quota/manager";
 import { ImageGC } from "./resource/image_gc";
+import { CONFIG_REBASE_KEYS, initBootRebaseCause } from "./session/persistence";
 import { TimerManager } from "./timer";
-import { registerAllTools } from "./tool/bootstrap";
+import { nativeToolsJsonForBoot, registerAllTools } from "./tool/bootstrap";
 // 副作用导入：注册默认 MemoryEngine 工厂（命令/工具/调度器首次使用时按配置创建引擎）
 import "./memory/v2";
 import { normalizeMsgId } from "./utils/message_id";
@@ -62,13 +67,32 @@ function main() {
   ContextService.configureArchivedRetention(() => Config.context.KEEP_ARCHIVED_RAW);
   initAgents();
   registerAgentApi();
+  // #163 REQ-D7-06 ⑤：配置分区变更 → 该分区进入渲染字节 ⇒ 全部会话记一次 `config:<key>` rebase。
+  // 放在 Config.registerConfig()（上方）之后只是遵守"先解析后监听"的装配顺序；
+  // 真正的防误报由 `config/hooks.ts` 的"首次观察只建基线、不通知"保证 ——
+  // 否则 registerConfig 只预热了 model 分区，其余分区的首次读取都会广播一次假 rebase。
+  setConfigChangeListener(key => {
+    if (!(CONFIG_REBASE_KEYS as readonly string[]).includes(key)) return;
+    for (const agent of Agent.listAgents()) {
+      for (const session of agent.sessionService.listSessions()) {
+        session.notePrefixRebase(`config:${key}`, 0);
+      }
+    }
+  });
   checkUpdate();
   registerAllTools();
+  // #163 REQ-D7-06 ⑥⑦⑧：引导期归因（版本变化⇒upgrade / 工具 schema 变化⇒tools / 否则 reload）。
+  // 必须晚于 registerAllTools()：`nativeToolsJsonForBoot()` 依赖元工具已注册。
+  initBootRebaseCause(PLUGIN_VERSION, nativeToolsJsonForBoot());
   // 辅助智能体能力层装配：适配器注册表必须在提示词段注册前（imageHost/resource 段按 snippet 判断）
   installAuxTools();
   installAuxAgent();
   // 提示词段注册：必须在工具注册之后（段构建依赖工具可见性）与配置预热之后（读取角色/开关）
   registerBuiltinSections();
+  // 内置注入 provider 注册（#163 D3）：内存/时间/MCP 三类增量注入块的 provider。
+  // 必须晚于 installPromptMemorySource()（memory provider 的数据源端口）与 Config.registerConfig()；
+  // 早于任何起轮路径（第一条消息可能随时到达，晚注册会静默少注一轮）。
+  registerBuiltinInjectionProviders();
   registerJudgePromptTextsImpl();
   // 定时器：先加载队列并 reconcile 掉失效规则条目，再启动轮询（M2 拆分 loadQueue/start）
   TimerManager.loadQueue();

@@ -19,6 +19,14 @@ export interface UserMessageItem extends BaseMessageItem {
     userId: string;
     messageId: string;
     /**
+     * 写入时冻结的显示名（#163 REQ-D2-04，legacy messages 路径）。
+     *
+     * 旧模型的 `[from]` 由 `buildContent` → `formatFromPrefix` 渲染；那里读活名
+     * （`User.get(uid).userName`）会让改名改写已发送历史的字节。冻结后渲染只读本字段，
+     * 旧数据没有该字段 ⇒ 回落活名（不回填历史，REQ-D2-05）。
+     */
+    frozenName?: string;
+    /**
      * 该条已做过有损处理（历史 LLM 压缩/合并压缩，或旧回退路径纯代码截断）：
      * 旧读取逻辑据此避免重复处理；新写入不再有 LLM 压缩调用。
      */

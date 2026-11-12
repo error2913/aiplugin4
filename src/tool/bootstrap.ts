@@ -5,6 +5,7 @@ import Logger from "../logger";
 
 import { registerMCPTools } from "./mcp";
 import { registerSkills } from "./skills";
+import { nativeRequestToolsJson } from "./tool";
 import { registerTools } from "./tools/init";
 
 const log = Logger.withTag('tool');
@@ -14,4 +15,15 @@ export function registerAllTools(): void {
     registerTools();
     registerSkills();
     registerMCPTools().catch(e => log.exception('注册MCP工具失败', e));
+}
+
+/**
+ * 原生工具 schema 的稳定指纹（#163 REQ-D7-06 ⑧）。
+ *
+ * 由装配层再导出而不是让 `index.ts` 直接 import `tool/tool.ts`：
+ * 入口只需要"注册后取指纹"这一个动作，不应因此增加一条到工具注册表的直接边。
+ * 必须在 `registerAllTools()` **之后**调用（元工具注册后 schema 才稳定）。
+ */
+export function nativeToolsJsonForBoot(): string {
+    return nativeRequestToolsJson();
 }

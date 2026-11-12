@@ -647,6 +647,12 @@ export function registerContextEditTools() {
             }
             const flushed = await target.contextV2.flush();
             if (!flushed.ok) return `替换已在内存生效但落盘失败: ${flushed.error ?? 'unknown'}（请重试）`;
+            // #163 REQ-D7-06 ④：替换已发送区的事件正文 ⇒ 白名单 rebase（edit）
+            try {
+                target.notePrefixRebase?.('edit', 0);
+            } catch {
+                // 目标会话可能是游离/旧版对象：记账缺失不影响替换本身
+            }
             log.info(`上下文替换(v2): target=${labelOf(sid as string)} scope=${scope} 改动${outcome.entries}条 命中${outcome.hits}处`);
             return [
                 `已完成上下文替换 · ${labelOf(sid as string)}`,

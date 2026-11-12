@@ -11,9 +11,16 @@ import { transformArrayToContent } from "../utils/string";
 import type { MessageSegment } from "../utils/string";
 
 import { PendingMessage, writePendingRecord } from "./persistence";
+import { extractQuoteId, resolveQuote } from "./quote";
+import type { QuoteDraft } from "./quote";
 import type { Session } from "./session";
 
 const log = logger.withTag('session');
+
+/** 引用展开失败时的占位前缀（REQ-D6-03；拼进正文而非单独事件：失败时没有可信发言人，避免伪造 [from:unknown]） */
+function quotePlaceholder(quoteId: string): string {
+    return `[quote_unavailable:${quoteId}] `;
+}
 
 /** 普通收信：转内容并直接入上下文（非忙态） */
 export async function handleReceipt(session: Session, ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], opts?: { updateRef?: boolean }): Promise<void> {
@@ -21,8 +28,16 @@ export async function handleReceipt(session: Session, ctx: seal.MsgContext, msg:
     // A12：记录最近一条真实用户消息的原始 rawId（按端点），供定时/自主/事件触发回填引用。
     // bot 自身消息、命令、ob11 补收由调用方传 updateRef:false。
     session.noteInboundRef(ctx, msg, opts?.updateRef !== false);
-    const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
-    await session.context.addUserMessage(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg));
+    const { content: rawContent } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
+    let content = rawContent;
+    // REQ-D6-10：引用展开挂在收信层，不动 transformArrayToContent 契约（它仍产出 [quote:<id>] 文本）
+    const quoteId = extractQuoteId(messageArray);
+    let quote: QuoteDraft | null = null;
+    if (quoteId) {
+        quote = await resolveQuote(session, ctx, msg, quoteId);
+        if (!quote) content = quotePlaceholder(quoteId) + content;
+    }
+    await session.context.addUserMessageWithQuote(ctx, content, ctx.player!.userId, getRecordMessageId(ctx, msg), quote);
     // v7 待机路径：非忙态入库后，T ≥ C 时零 LLM 归档（总结在飞时控制器自行跳过）
     if (!session.running && !session.starting) {
         try { archiveControllerFor(session)?.onIdleAppend(); } catch { /* 归档失败不影响入库 */ }
@@ -34,10 +49,13 @@ export async function deferReceipt(session: Session, ctx: seal.MsgContext, msg: 
     session.lastCtx = ctx;
     session.noteInboundRef(ctx, msg, opts?.updateRef !== false);
     const { content } = await transformArrayToContent(ctx, messageArray, getRecordMessageId(ctx, msg));
+    // REQ-D6-11：忙态只记被引 msgId，**不展开**（不在轮子跑的时候做网络/IO），等 flushPending 再展开
+    const quoteOf = extractQuoteId(messageArray) || undefined;
     session.pendingQueue.push({
         ctx,
         msg,
         content,
+        ...(quoteOf ? { quoteOf } : {}),
         userId: ctx.player!.userId,
         messageId: getRecordMessageId(ctx, msg),
         kind,
@@ -65,7 +83,16 @@ export async function flushPending(session: Session, opts?: { writeTriggerPrompt
     for (const p of pending) {
         if (p.kind === 'trigger') hasTrigger = true;
         // 事件触发挂起没有用户消息内容，只写触发系统提示（避免产生空 user 事件）
-        if (p.content) await session.context.addUserMessage(p.ctx, p.content, p.userId, p.messageId);
+        if (p.content) {
+            let content = p.content;
+            let quote: QuoteDraft | null = null;
+            // REQ-D6-11：忙态没展开的引用在这里补展开，写库时引用事件紧邻回复事件之前
+            if (p.quoteOf && session.contextV2) {
+                quote = await resolveQuote(session, p.ctx, p.msg, p.quoteOf);
+                if (!quote) content = quotePlaceholder(p.quoteOf) + content;
+            }
+            await session.context.addUserMessageWithQuote(p.ctx, content, p.userId, p.messageId, quote);
+        }
         if (p.systemReason && (p.kind !== 'trigger' || writeTriggerPrompts)) {
             await session.context.addSystemUserMessage(p.systemReason, p.systemName || SYSTEM_NAME.trigger);
         }

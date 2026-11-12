@@ -3,7 +3,6 @@
 import Config from "../config/config";
 import Message from "../context/message";
 import type { UserMessage, UserMessageItem } from "../context/types";
-import { auxRegistry } from "../core/ports/aux_tools";
 import type { Session } from "../session/session";
 import type { GroupInfo, UserInfo } from "../session/types";
 import User from "../session/user";
@@ -86,28 +85,30 @@ export interface ImagePromptFlagInput {
     imageHostPrompt: boolean;
     /** 资源页「资源清单注入」开关（默认 false） */
     resourcePrompt: boolean;
-    /** aux 注册表是否存在 image-host 片段（适配器注册条件已保证 = 图床/MCP 有图片能力） */
-    hasImageHostSnippet: boolean;
-    /** aux 注册表是否存在 resource 片段（资源开关开且确有内置图片/本地资源） */
-    hasResourceSnippet: boolean;
 }
 
-/** 图片相关 flag 的唯一派生点：不再直接 import ImageHost/MCP 判断（等价性由适配器注册条件保证） */
+/**
+ * 图片相关 flag 的唯一派生点。
+ *
+ * #163 D1-07：**门控只依赖配置开关**，不再看 aux 注册表（`auxRegistry.hasSnippet`）。
+ * 原实现里 `imageHost`/`resourceLibrary` 会随「图床/MCP 连断」翻转 ⇒ system 中部断裂。
+ * 代价：开关打开时会常驻一段说明文案（即使当前没有图床能力），这是稳定性换体积的必然选择。
+ */
 export function deriveImagePromptFlags(input: ImagePromptFlagInput): {
     imageUsage: boolean;
     imageHost: boolean;
     resourceLibrary: boolean;
     imageLibrary: boolean;
 } {
-    const imageHost = !!input.imageHostPrompt && !!input.hasImageHostSnippet;
-    const resourceLibrary = !!input.resourcePrompt && !!input.hasResourceSnippet;
+    const imageHost = !!input.imageHostPrompt;
+    const resourceLibrary = !!input.resourcePrompt;
     // 有意修正（方案 §10.5 行为差异 #2）：只开了「接收图片」也应该告诉模型怎么用图片
     const imageUsage = !!input.receiveImage || imageHost || resourceLibrary;
     return {
         imageUsage,
         imageHost,
         resourceLibrary,
-        // 兼容旧字段（下一版删除）：语义已收窄为「真有图片能力的来源」，与旧 ImageHost||MCP 等价
+        // 兼容旧字段（下一版删除）：语义已收窄为「图床提示注入开关」
         imageLibrary: imageHost,
     };
 }
@@ -139,8 +140,6 @@ function readFlags(): PromptFlags {
         receiveImage: !!RECEIVE_IMAGE,
         imageHostPrompt: safeBoolean(() => Config.image.IMAGE_HOST_PROMPT, true),
         resourcePrompt: safeBoolean(() => Config.resource.RESOURCE_LIBRARY, false),
-        hasImageHostSnippet: auxRegistry.hasSnippet('image-host'),
-        hasResourceSnippet: auxRegistry.hasSnippet('resource'),
     });
     return {
         status: !!STATUS,
@@ -218,19 +217,20 @@ export async function buildSystemPromptContent(
     return parts.system;
 }
 
-/** 仅取 runtime 文本（handleMessages 未拿到 systemMessage 时的兜底） */
-export async function buildRuntimePromptText(ctx: seal.MsgContext, session: Session): Promise<string> {
-    const parts = await buildPromptParts(ctx, session);
-    return parts.runtime;
-}
+// 说明：#163 D1c（PR-08）删除了原 `buildRuntimePromptText()` 导出。
+// runtime 通道整体移除（请求体末尾不再追加 runtime 尾块），因此「只取 runtime 文本」没有调用方；
+// 需要提示词一律用 buildPromptParts，只取 system 用 parts.system。
+
+/** system 消息的 contentItem（不含 time：system 在请求体最前端，时间戳是最贵的违约字节） */
+export type SystemContentItem = { text: string; systemName: string };
 
 /** 把组装结果转成 system 消息体（与 utils/message.ts 的 ContextMessage 结构兼容） */
-export function promptPartsToSystemMessage(parts: PromptParts): { role: 'system'; contentItems: Array<{ text: string; time: number; systemName: string }> } {
+export function promptPartsToSystemMessage(parts: PromptParts): { role: 'system'; contentItems: SystemContentItem[] } {
     return {
         role: 'system',
         contentItems: [{
             text: parts.system,
-            time: Math.floor(Date.now() / 1000),
+            // #163 D1-02：不写 time —— 每轮变化的时间戳会让整个请求体前缀作废
             systemName: '',
         }],
     };

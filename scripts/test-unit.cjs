@@ -13,6 +13,7 @@ const esbuild = require('esbuild');
 const repo = path.resolve(__dirname, '..');
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiplugin4-unit-'));
 const bundles = {
+    archiveTools: path.join(outDir, 'unit-archive-tools.cjs'),
     main: path.join(outDir, 'unit-main.cjs'),
     subagent: path.join(outDir, 'unit-subagent.cjs'),
     v5: path.join(outDir, 'unit-v5.cjs'),
@@ -60,6 +61,12 @@ const bundles = {
     tokenSelect: path.join(outDir, 'unit-token-select.cjs'),
     quota: path.join(outDir, 'unit-quota.cjs'),
     quotaRequest: path.join(outDir, 'unit-quota-request.cjs'),
+    timeInject: path.join(outDir, 'unit-time-inject.cjs'),
+    prefixObs: path.join(outDir, 'unit-prefix-obs.cjs'),
+    quote: path.join(outDir, 'unit-quote.cjs'),
+    injectionProviders: path.join(outDir, 'unit-injection-providers.cjs'),
+    injectionContract: path.join(outDir, 'unit-injection-contract.cjs'),
+    injectionPlan: path.join(outDir, 'unit-injection-plan.cjs'),
 };
 
 const { installSealEnv } = require('./harness/seal-env.cjs');
@@ -115,7 +122,14 @@ const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-m
         ['triggerTools', path.join(repo, 'scripts/unit-test-trigger-tools.ts')],
         ['tokenSelect', path.join(repo, 'scripts/unit-test-token-select.ts')],
         ['quota', path.join(repo, 'scripts/unit-test-quota.ts')],
-        ['quotaRequest', path.join(repo, 'scripts/unit-test-quota-request.ts')]
+        ['quotaRequest', path.join(repo, 'scripts/unit-test-quota-request.ts')],
+        ['timeInject', path.join(repo, 'scripts/unit-test-time-inject.ts')],
+        ['prefixObs', path.join(repo, 'scripts/unit-test-prefix-obs.ts')],
+        ['quote', path.join(repo, 'scripts/unit-test-quote.ts')],
+        ['injectionProviders', path.join(repo, 'scripts/unit-test-injection-providers.ts')],
+        ['injectionContract', path.join(repo, 'scripts/unit-test-injection-contract.ts')],
+        ['injectionPlan', path.join(repo, 'scripts/unit-test-injection-plan.ts')],
+        ['archiveTools', path.join(repo, 'scripts/unit-test-archive-tools.ts')]
     ];
     const all = {};
     for (const [name, entryPoint] of entries) {

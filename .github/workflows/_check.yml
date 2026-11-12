@@ -36,6 +36,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # 前缀纯度守卫（#163 R1）：禁止请求体渲染路径出现 Date.now()/活读用户/模板拼接等
+      # 「每轮会变」的字节。这类违约不会让任何其它测试失败，只会安静地把缓存命中率打下来，
+      # 所以必须单独做成 CI 失败项。用 strict 模式：白名单条目失效也算失败（防止改造没做完也没报错）。
+      - name: Prefix purity
+        run: npm run lint:prefix:strict
+
       # 必须直跑 tsconfig（npx tsc --noEmit），不要加 --strict：
       # 命令行 --strict 会覆盖 tsconfig 的严格选项，实测会把「联合类型未收窄」
       # （Property 'error' does not exist）这类错误静默吞掉 ——

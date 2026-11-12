@@ -853,6 +853,48 @@ export function fmtDate(timestamp: number) {
     const second = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
+
+/**
+ * 带时区偏移的本地时间：`2026-11-09 22:13:54 +08:00`（get_time 工具与 time 注入块共用）。
+ * @param timestamp Unix 秒
+ * @param offsetMinutes 期望展示的时区偏移（分钟；东八区 = 480）。缺省用宿主本地时区。
+ *  传入该参数时按"UTC + 偏移"换算墙钟时间（宿主时区不可靠/需固定时区时用）。
+ */
+export function fmtDateTz(timestamp: number, offsetMinutes?: number): string {
+    const raw = Number(timestamp);
+    const sec = Number.isFinite(raw) ? Math.floor(raw) : Math.floor(Date.now() / 1000);
+    const date = new Date(sec * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    let offsetMin: number;
+    let year: number;
+    let month: number;
+    let day: number;
+    let hour: number;
+    let minute: number;
+    let second: number;
+    if (typeof offsetMinutes === 'number' && Number.isFinite(offsetMinutes)) {
+        offsetMin = Math.trunc(offsetMinutes);
+        const shifted = new Date(date.getTime() + offsetMin * 60000);
+        year = shifted.getUTCFullYear();
+        month = shifted.getUTCMonth() + 1;
+        day = shifted.getUTCDate();
+        hour = shifted.getUTCHours();
+        minute = shifted.getUTCMinutes();
+        second = shifted.getUTCSeconds();
+    } else {
+        offsetMin = -date.getTimezoneOffset();
+        year = date.getFullYear();
+        month = date.getMonth() + 1;
+        day = date.getDate();
+        hour = date.getHours();
+        minute = date.getMinutes();
+        second = date.getSeconds();
+    }
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const abs = Math.abs(offsetMin);
+    const tz = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+    return `${year}-${pad(month)}-${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)} ${tz}`;
+}
 export { fixJsonString } from "./json";
 
 export function parseActivityTime(s: string): [number, number, number] {

@@ -165,6 +165,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             event: 'event',
             eventTrigger: 'event-trigger',
             triggerRule: 'trigger-rule',
+            wake: 'wake',
         });
         for (const [key, value] of Object.entries(SYSTEM_NAME)) {
             assert.match(value, /^[a-z][a-z-]*$/, `${key} 必须是 ASCII 小写英文: ${value}`);

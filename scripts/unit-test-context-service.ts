@@ -86,7 +86,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
         assert.equal(result.messages[0].role, 'system');
         assert.equal(result.messages.length, 2);
-        assert.equal(result.stats.unitsSelected, 1);
+        assert.equal(result.stats.unitsRendered, 1, '两条相邻 user 合并为 1 个单元并全量渲染');
+        assert.equal(result.stats.needsArchive, false);
     },
 
     async testContextServiceRecall() {

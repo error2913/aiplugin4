@@ -158,6 +158,15 @@ export function archiveControllerFor(session: Session): ArchiveController | null
         estimateTextTokens,
         batchTokens: COMPACT_BATCH_TOKENS,
         summaryMaxChars: SUMMARY_MAX_CHARS,
+        // #163 REQ-D7-05：归档是唯一 rebase 点 —— 水位推进后同步把前缀基线作废
+        onRebase: (reason, throughSeq) => session.notePrefixRebase(reason, throughSeq),
+        // #163 REQ-D9：观测钩子上抛到 session（`.ai ctx` 展示 + 探针）
+        observe: (event, detail) => session.notePrefixObservation?.(event, detail),
+        // #163 REQ-D9-02：`.ai ctx` 读取前缀 rebase 记账（只读，不触发编译）
+        getRebaseStats: () => ({
+            count: session.prefixRebase?.count ?? 0,
+            reason: session.prefixRebase?.reason ?? '',
+        }),
         log: (message, error) => {
             if (error === undefined) log.warning(message);
             else log.warning(`${message}: ${error instanceof Error ? error.message : String(error)}`);

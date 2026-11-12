@@ -10,7 +10,7 @@ import { getPromptMemorySource, setPromptMemorySource } from "../src/prompt/memo
 import { listPromptSections, registerExtensionSection, registerPromptSection, registerPromptSections, resetPromptSections } from "../src/prompt/registry";
 import { registerBuiltinSections } from "../src/prompt/sections";
 import { buildCapabilitiesSection } from "../src/prompt/sections/capabilities";
-import { MEMORY_TAIL_GUARD } from "../src/prompt/texts/en";
+import { MEMORY_HINT, MEMORY_TAIL_GUARD } from "../src/prompt/texts/en";
 import type { PromptContext, PromptSection } from "../src/prompt/types";
 import { registerAllTools } from "../src/tool/bootstrap";
 import { toolMap } from "../src/tool/registry";
@@ -128,14 +128,26 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(estimateTextTokens(big.query) <= MEMORY_QUERY_TOKEN_BUDGET + 8, '截断后 query 仍应在预算附近');
     },
 
-    /** 内置段注册齐全且命名符合 core:/tool: 约定 */
+    /** 内置段注册齐全且命名符合 core:/tool: 约定（#163 D1c：core:time/core:memory/tool:mcp-instructions 已删除） */
     testBuiltinSectionsRegistered(): void {
         restoreBuiltinSections();
         const names = listPromptSections().map(section => section.name);
-        for (const expected of ['core:identity', 'core:global', 'core:role', 'core:language', 'core:session', 'core:markers', 'core:reply', 'core:skills', 'core:knowledge', 'core:delegation', 'core:time', 'core:memory']) {
+        for (const expected of ['core:identity', 'core:global', 'core:role', 'core:language', 'core:session', 'core:markers', 'core:reply', 'core:skills', 'core:knowledge', 'core:delegation', 'core:memory-hint']) {
             assert.ok(names.includes(expected), `缺少内置段 ${expected}`);
         }
+        // 三个 runtime 段随 D1c 一并删除：时间/记忆/MCP 说明改由增量注入块承载
+        for (const removed of ['core:time', 'core:memory', 'tool:mcp-instructions']) {
+            assert.ok(!names.includes(removed), `内置段 ${removed} 应已删除（#163 D1c）`);
+        }
         assert.ok(names.every(name => name.startsWith('core:') || name.startsWith('tool:')), '内置段应使用 core:/tool: 命名空间');
+        // REQ-D1-06 验收：内置 runtime 段数必须为 0
+        const runtimeSections = listPromptSections()
+            .filter(section => section.channel === 'runtime' && (section.scope ?? 'core') === 'core');
+        assert.equal(runtimeSections.length, 0, `内置 runtime 段应为 0，实际：${runtimeSections.map(s => s.name).join(',')}`);
+        // core:memory-hint 已改 system 通道（REQ-D1-06）
+        const hint = listPromptSections().find(section => section.name === 'core:memory-hint');
+        assert.ok(hint, 'core:memory-hint 段应存在');
+        assert.equal(hint!.channel, 'system', 'core:memory-hint 已改 system 通道（常量进稳定前缀）');
     },
 
     /** 按 order 升序、同 order 按 name 排序，空段丢弃 */
@@ -289,7 +301,12 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 能力地图：按会话已开启工具生成英文域清单；STATUS 关闭或无可用工具时不出现 */
+    /**
+     * 能力段（#163 D1-08 后为**常量段**）：
+     * - STATUS 开启时恒输出同一份常量文本，**不**随工具开关/MCP 连断/平台变化；
+     * - 不再列出任何具体域或代表工具名（能力发现改由 list_tools / search_tools 现场查询）；
+     * - STATUS 关闭时为空。
+     */
     async testCapabilityMapSection(): Promise<void> {
         ensureConfigRegistered();
         restoreBuiltinSections();
@@ -315,20 +332,31 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } as any;
 
         const parts = await buildPromptParts(ctx, session);
-        assert.ok(parts.system.includes('## Capabilities'), '应包含能力地图段');
-        assert.ok(parts.system.includes('- Memory —'), '应列出 Memory 能力域');
-        assert.ok(parts.system.includes('memory_add'), '应给出代表工具名');
-        assert.ok(parts.system.includes('before replying that you cannot do it'), '应包含“先查工具再拒绝”的规则');
-        assert.ok(!/[\u4e00-\u9fff]/.test(withoutUserContentSections(parts.system)), '能力地图等内置段应为英文（技能/知识库用户内容除外）');
+        assert.ok(parts.system.includes('## Capabilities'), '应包含能力段');
+        assert.ok(parts.system.includes('list_tools'), '应指引 list_tools');
+        assert.ok(parts.system.includes('search_tools'), '应指引 search_tools');
+        assert.ok(!/[\u4e00-\u9fff]/.test(withoutUserContentSections(parts.system)), '内置段应为英文（技能/知识库用户内容除外）');
 
-        const noTools = await buildPromptParts(ctx, { ...session, toolState: {} });
-        assert.ok(!noTools.system.includes('## Capabilities'), '无已开启工具时不应出现能力地图');
+        // 关键断言（R1）：**任意**工具开关组合下能力段逐字节相同
+        const allOff = await buildPromptParts(ctx, { ...session, toolState: {} });
+        assert.ok(allOff.system.includes('## Capabilities'), '工具全关时能力段仍存在（常量段不随开关变化）');
+        const oneOn = await buildPromptParts(ctx, { ...session, toolState: { memory_add: true } as any });
+        const extract = (system: string): string => {
+            const start = system.indexOf('## Capabilities');
+            if (start < 0) return '';
+            const rest = system.slice(start);
+            const next = rest.indexOf('\n## ', 1);
+            return next < 0 ? rest : rest.slice(0, next);
+        };
+        assert.equal(extract(parts.system), extract(allOff.system), '能力段不随工具开关变化（常量）');
+        assert.equal(extract(parts.system), extract(oneOn.system), '能力段不随工具开关变化（常量）');
+        assert.ok(!/^- (Memory|Images|Web|OB11) —/m.test(extract(parts.system)), '不再枚举具体能力域');
 
         const hidden = buildCapabilitiesSection({
             ...makeContext(),
             flags: { ...makeContext().flags, status: false },
         });
-        assert.equal(hidden, '', 'STATUS 关闭时能力地图应为空');
+        assert.equal(hidden, '', 'STATUS 关闭时能力段应为空');
     },
 
     /** 段统计表包含段名与通道 */
@@ -346,7 +374,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         });
     },
 
-    /** 内置段整体组装：英文、含预期标题、runtime 段走 runtime 通道、无中文 */
+    /** 内置段整体组装：英文、含预期标题、内置 runtime 段清零（#163 D1c）、无中文 */
     async testBuiltinPromptAssemblyIsEnglish(): Promise<void> {
         ensureConfigRegistered();
         restoreBuiltinSections();
@@ -375,9 +403,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(parts.system.includes('## Message markers'), '应包含英文消息标记段');
         assert.ok(parts.system.includes('[from:name(ID)]'), '标记示例不应被剥掉（sanitize 只作用于外部段）');
         assert.ok(parts.system.includes('[content-compressed]'), '应说明新的英文标记');
-        assert.ok(parts.runtime.includes('## Current time'), '时间应走 runtime 通道');
+        // #163 D1c（PR-08）：内置 runtime 段已清零（core:time/core:memory/tool:mcp-instructions 全删）
+        assert.equal(parts.runtime, '', '内置 runtime 段已清零（#163 D1c）');
+        assert.ok(!parts.system.includes('## Current time'), '时间不再进 system 常量段（改由 kind:time 注入块 + get_time）');
         assert.ok(!/[\u4e00-\u9fff]/.test(withoutUserContentSections(parts.system)), 'system 提示词（技能/知识库用户内容除外）不应包含中文');
-        assert.ok(!/[\u4e00-\u9fff]/.test(parts.runtime), 'runtime 文本不应包含中文');
         assert.ok(!parts.runtime.includes(MEMORY_TAIL_GUARD), '无记忆时不应出现记忆尾部约束句');
         assert.ok(parts.stats.length >= 8, '内置段应有足够多的段被组装');
         assert.match(parts.digest, /^[0-9a-f]{8}$/);
@@ -430,37 +459,45 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
-    /** 记忆尾部约束：只在 runtime 且记忆非空时追加；无记忆时不出现、也不进 system */
+    /**
+     * 原 `testMemoryTailGuard` 迁移（#163 D1c / REQ-D1-04 + D1-06）：
+     * 原 runtime 记忆段已删除，记忆改由 `core:memory` 注入 provider（见 `scripts/unit-test-injection-providers.ts`）。
+     * 本用例改为验证两件事：
+     * 1. 即使 memory source 返回正文，`parts.runtime` 里也**不再**出现记忆文本与 `MEMORY_TAIL_GUARD`（runtime 段已清零）；
+     * 2. `parts.system` 含 `MEMORY_HINT` 当且仅当 memory 开关打开（core:memory-hint 已改 system 通道）。
+     */
     async testMemoryTailGuard(): Promise<void> {
         ensureConfigRegistered();
         restoreBuiltinSections();
         const original = getPromptMemorySource();
-        let body = '## Group chat memory (GuardGroup)\n- likes coffee';
-        let revision = 1;
+        const body = '## Group chat memory (GuardGroup)\n- likes coffee';
         setPromptMemorySource({
             initKnowledge: async () => undefined,
             knowledgeSignature: () => '',
             knowledgeIds: () => [],
             formatKnowledgeFor: () => '',
-            memoryRevision: () => revision,
-            summaryRevision: () => revision,
+            memoryRevision: () => 1,
+            summaryRevision: () => 1,
             buildLongTermPrompt: async () => body,
             buildObservationPrompt: () => '',
         });
         try {
-            const context = (): PromptContext => makeContext({
-                flags: { ...makeContext().flags, memory: true },
-                memoryQuery: `guard-query-${revision}`,
+            const context = (memory: boolean): PromptContext => makeContext({
+                flags: { ...makeContext().flags, memory },
+                memoryQuery: 'guard-query-1',
             });
-            let parts = await assemblePrompt(context());
-            assert.ok(parts.runtime.includes(body), '记忆文本应走 runtime 通道');
-            assert.ok(parts.runtime.endsWith(MEMORY_TAIL_GUARD), `记忆之后应追加尾部约束句，实际结尾：${parts.runtime.slice(-120)}`);
-            assert.ok(!parts.system.includes(MEMORY_TAIL_GUARD), '尾部约束句不得进入 system');
+            // memory 开：runtime 恒空、记忆正文不再出现；提示句进 system（REQ-D1-06）
+            let parts = await assemblePrompt(context(true));
+            assert.equal(parts.runtime, '', 'runtime 通道已移除，记忆不得再走 runtime（#163 D1c）');
+            assert.ok(!parts.runtime.includes(body), '记忆正文不得再进 runtime 段');
+            assert.ok(!parts.runtime.includes(MEMORY_TAIL_GUARD), 'MEMORY_TAIL_GUARD 不得再进 runtime 段');
+            assert.ok(parts.system.includes(MEMORY_HINT), '记忆开关打开时 system 应含 MEMORY_HINT（core:memory-hint 已改 system）');
+            assert.ok(!parts.system.includes(body), '记忆正文不得进入 system（改由 kind:memory 注入块承载）');
 
-            body = '';
-            revision += 1;
-            parts = await assemblePrompt(context());
-            assert.ok(!parts.runtime.includes(MEMORY_TAIL_GUARD), '无记忆时不应追加尾部约束句');
+            // memory 关：提示句不出现
+            parts = await assemblePrompt(context(false));
+            assert.ok(!parts.system.includes(MEMORY_HINT), '记忆开关关闭时 system 不应含 MEMORY_HINT');
+            assert.equal(parts.runtime, '');
         } finally {
             setPromptMemorySource(original);
         }

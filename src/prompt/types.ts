@@ -1,4 +1,5 @@
 // Prompt 段类型：注册表 / 组装器 / 段实现共用的纯类型（无运行时依赖）。
+import type { InjectionItem } from "../context/injections";   // L1 → L0，仅类型
 import type { Session } from "../session/session";
 import type { GroupInfo, UserInfo } from "../session/types";
 
@@ -118,4 +119,75 @@ export interface PromptParts {
     stats: SectionStat[];
     /** system + runtime 的稳定短哈希，用于日志/缓存排障 */
     digest: string;
+}
+
+// —— 增量注入（#163 D3）——
+
+/**
+ * provider 的只读输入：**不含**任何写入口与归档水位（REQ-D3-03 的类型级保证）。
+ *
+ * 结构上刻意不提供 `session.context.store` / `head` / `archivedThrough`：
+ * provider 只能"产出候选条目"，去重/预算/写块/定位/渲染/记账/释放全部由框架负责。
+ */
+export interface InjectionContext {
+    ctx: seal.MsgContext;
+    session: Session;
+    /** 只读开关快照（与 PromptFlags 同源） */
+    flags: PromptFlags;
+    isPrivate: boolean;
+    sessionId: string;
+    /** 记忆检索输入（同 PromptContext.memoryQuery） */
+    query: string;
+    users: UserInfo[];
+    group: GroupInfo | null;
+    /**
+     * 上次编译覆盖到的最大 seq（= lastSelectedSeq；框架拿它做 afterSeq，provider 只读）。
+     * **不是**"上一次请求的时刻"，是"已发送区最后一字节的位置"。
+     */
+    lastSentSeq: number;
+    /**
+     * 本轮冻结的当前时刻（毫秒，`Date.now()` 在**起轮时取一次**后传入）。
+     *
+     * 必须是值不是函数：provider 内部每次现取 `Date.now()` 会让同一轮两次 `build()` 结果不同
+     * ⇒ 破坏 R2（同一快照两次编译字节必须一致）。
+     */
+    now: number;
+    /** 上一次真正回复的 seq（0 = 从未回复）；`core:time` 的去重键 `time:<lastReplySeq>` 靠它 */
+    lastReplySeq: number;
+    /** 上一次真正回复的时刻（毫秒，0 = 从未回复） */
+    lastReplyAt: number;
+    /**
+     * 当前**活动块**里的条目键集合（只读）。
+     *
+     * 缺了它 provider 无法判"这条已经注入过"，只能每轮返回同样的条目 ⇒
+     * 框架层去重仍会拦住（`dup`），但会白白走一遍全量构建；更糟的是 provider 自己算的
+     * 阈值类逻辑（如"距上次回复 > 1h 才注入"）会重复产生同 key 不同正文。
+     */
+    listActiveKeys(): ReadonlySet<string>;
+    /** 文本 token 估算（统一口径：utils/token_estimate.estimateTextTokens） */
+    estimateTokens(text: string): number;
+}
+
+/** 一个注入 provider（内置/扩展统一形态；见 REQ-D3-01/02） */
+export interface InjectionProvider {
+    /** 命名空间：core:time / core:memory / core:mcp / core:wake / ext:<plugin>:<id> */
+    name: string;
+    /** 同轮调度顺序（升序；扩展固定 ≥ 10000） */
+    order: number;
+    /** 类型：决定去重集合与释放粒度 */
+    kind: string;
+    /** 失败是否可跳过（内置缺省 false，扩展缺省 true） */
+    optional?: boolean;
+    /** 只产候选条目；去重/预算/写块/定位/渲染/记账/释放全部由框架负责 */
+    build(c: InjectionContext): InjectionItem[] | Promise<InjectionItem[]>;
+}
+
+/** 一轮的注入产出：同一 provider 一轮一个 draft；框架按 kind 合并成一个块 */
+export interface InjectionDraft {
+    kind: string;
+    /** core = 内置；extension = 外部插件（单块字符上限 2000） */
+    scope?: 'core' | 'extension';
+    items: InjectionItem[];
+    /** Σ estimateTokens(text) + INJECTION_WRAP_TOKENS（由框架算，provider 不填） */
+    tokens: number;
 }

@@ -14,6 +14,37 @@ export interface BudgetSessionLike {
     context?: { v2BudgetCapValue?: number | null };
 }
 
+// ---------------- 归档预算 L（#163 REQ-D7-10/11，唯一实现） ----------------
+//
+// `L` = 永久预算 − 固定提示词（system + samples + 工具 schema + runtime 段）。
+// 编译层与「注入写入前的预算闸」必须调**同一函数**，否则两处口径漂移会出现
+// 「注入以为装得下、编译以为装不下」的裂缝（REQ-D7-11）。
+
+export interface ArchiveBudgetInput {
+    /** 永久预算（已乘校准系数，不含 context_too_long 临时 cap） */
+    permanentBudget: number;
+    /** system + samples 的 token 估算 */
+    prefixTokens: number;
+    /** 元工具 schema 预留（D8-05 常量） */
+    toolsReserveTokens: number;
+    /** runtime 段（PR-08 后恒为 0；保留字段以维持单一口径） */
+    runtimeTokens: number;
+}
+
+/**
+ * `L = max(1, permanentBudget − prefix − tools − runtime)`（纯函数，无 Config/无副作用）。
+ *
+ * 数值与旧内联写法**逐位相同**（`message.ts` 的 `Math.max(1, permanentBudget - fixedPromptTokens)`），
+ * 抽出来的唯一目的是让注入侧不必复制公式。
+ */
+export function resolveArchiveL(input: ArchiveBudgetInput): number {
+    const permanent = Math.max(0, Math.floor(Number(input.permanentBudget) || 0));
+    const fixed = Math.max(0, Math.floor(Number(input.prefixTokens) || 0))
+        + Math.max(0, Math.floor(Number(input.toolsReserveTokens) || 0))
+        + Math.max(0, Math.floor(Number(input.runtimeTokens) || 0));
+    return Math.max(1, permanent - fixed);
+}
+
 export interface ContextBudgets {
     /** 永久预算：配置/会话覆盖 → 探测窗口；**不含** context_too_long 的临时 cap */
     permanentBudget: number;
@@ -22,8 +53,8 @@ export interface ContextBudgets {
     retainPercent: number;
     /** 压缩后保留的最新原文目标 token（永久预算 × 保留强度） */
     targetTokens: number;
-    /** 标签边界 token（与 targetTokens 相同；单列便于调用方语义化） */
-    tagBoundaryTokens: number;
+    // #163 D2（PR-09）：`tagBoundaryTokens` 已删除 —— 标签分级（[msg_id]/[time] 按预算边界开合）
+    // 整体移除后，`targetTokens` 是唯一保留强度口径。保留重复字段只会诱导后人重新引入边界逻辑。
 }
 
 /**
@@ -53,6 +84,5 @@ export function resolveContextBudgets(session: BudgetSessionLike | undefined, mo
         requestBudget,
         retainPercent,
         targetTokens,
-        tagBoundaryTokens: targetTokens,
     };
 }

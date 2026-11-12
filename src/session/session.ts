@@ -39,6 +39,9 @@ import User from "./user";
 
 const log = logger.withTag('session');
 
+/** 缓存命中率滚动窗口的轮数（#163 REQ-D9-03：近 100 轮，超出滚动淘汰） */
+const CACHE_WINDOW_TURNS = 100;
+
 /**
  * 起轮结果（C6 统一契约）：
  * - fired：真正起了一轮（run/runStream 返回 started=true）
@@ -183,6 +186,112 @@ export class Session {
     aiTriggeredAt = 0;
     /** 运行时字段：本会话账本——评分调用次数（不持久化；`.ai ctx` 展示用） */
     ctxStats: { judge: number } = { judge: 0 };
+    /**
+     * 前缀 rebase 记账（#163 REQ-D7-05/06）：**运行时字段，不落盘**。
+     *
+     * 为什么放 Session 而不落盘：它是纯观测（`.ai ctx` 展示 + 探针），丢失只会让观测少一轮，
+     * 不影响 R1 的正确性——R1 的保证来自"只有归档/rebase 才改前缀"，而 rebase 本身是
+     * 由 archivedThrough/redact/编辑这些**已落盘**的水位驱动的。落盘反而会引入迁移面。
+     */
+    prefixRebase: { count: number; reason: string; at: number; throughSeq: number } = {
+        count: 0, reason: '', at: 0, throughSeq: 0,
+    };
+    /** 上轮请求体快照（D2 建立；rebase 时必须同 tick 置空，否则会拿旧基线判"漂移"） */
+    prefixSnapshot: { messages: string[]; throughSeq: number } | null = null;
+    /** 引导期 rebase 已归因（reload/upgrade/tools 各只记一次，避免每轮重复记账） */
+    rebaseBootNoted = false;
+    /**
+     * 上轮编译的 `stats.summaryStale`（#163 REQ-D7-06 ⑨）。
+     *
+     * 只有 false→true 的**跳变**才记一次 `summary-stale` rebase：摘要一旦 stale，
+     * 它会连续多轮保持 stale（直到被重算），若按"为真就记"会每轮 +1 污染观测。
+     */
+    lastSummaryStale = false;
+    /** 最近一条前缀观测事件（#163 D9；运行时字段，不落盘，只保留最新一条） */
+    prefixObservation: { event: string; at: number; detail: Record<string, unknown> } | null = null;
+    /**
+     * 注入块的渲染锚点（#163 D3b）：上一次请求真正发送到的最大 seq。
+     *
+     * 新块 `afterSeq = max(本值, archivedThrough)`，保证块落在"已发送内容之后"而不是中间，
+     * 从而不改变已发送区的任何字节（R1）。run 未发出请求时也要推进（否则下次注入落位偏早）。
+     */
+    injectionAnchorSeq = 0;
+
+    /**
+     * 记一次前缀 rebase（同步；调用方必须在归档/编辑落盘的同 tick 内调用）。
+     *
+     * 这是**唯一**允许"前缀整体失效"的记账点：把 `prefixSnapshot` 同 tick 置空，
+     * 使下一轮不会拿 rebase 前的基线去判漂移（否则会误判成"非白名单漂移"）。
+     */
+    notePrefixRebase(reason: string, throughSeq: number): void {
+        const count = (this.prefixRebase?.count || 0) + 1;
+        this.prefixRebase = {
+            count,
+            reason: String(reason || 'unknown'),
+            at: Date.now(),
+            throughSeq: Math.max(0, Math.floor(Number(throughSeq) || 0)),
+        };
+        this.prefixSnapshot = null;
+    }
+
+    /**
+     * 记一条前缀观测事件（#163 D9）：只保留**最近一条**，避免运行时无界增长。
+     *
+     * 为什么只留一条：观测窗口是"当前这一轮为什么要 rebase/为什么注入越界"，
+     * 历史明细由日志承担（`logger.warning`）；保留数组会变成第二个落盘面。
+     */
+    notePrefixObservation(event: string, detail: Record<string, unknown>): void {
+        this.prefixObservation = {
+            event: String(event || 'unknown'),
+            at: Date.now(),
+            detail: detail && typeof detail === 'object' ? { ...detail } : {},
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // #163 D9-03：每会话缓存命中率（近 100 轮，纯运行时，不落盘）
+    // ------------------------------------------------------------------
+
+    /** 近 100 轮缓存命中统计（`ring` 定长窗口，累加值随之滚动，避免无界增长） */
+    cacheWindow: {
+        turns: number;
+        prompt: number;
+        read: number;
+        ring: Array<{ prompt: number; read: number }>;
+    } = { turns: 0, prompt: 0, read: 0, ring: [] };
+
+    /**
+     * 记一轮真实请求的 usage。
+     *
+     * 只累计 `prompt_tokens > 0` 的轮次：失败/中断轮次的 usage 可能缺字段或为 0，
+     * 计入会把命中率压低（分母变大、分子不变），从而让「缓存失效」的观测失真。
+     */
+    noteCacheUsage(usage: { prompt_tokens?: number; cache_read_tokens?: number } | null | undefined): void {
+        const prompt = Math.max(0, Math.floor(Number(usage?.prompt_tokens) || 0));
+        if (prompt <= 0) return;
+        const read = Math.max(0, Math.floor(Number(usage?.cache_read_tokens) || 0));
+        const ring = this.cacheWindow.ring;
+        ring.push({ prompt, read });
+        while (ring.length > CACHE_WINDOW_TURNS) {
+            const old = ring.shift();
+            if (!old) break;
+            this.cacheWindow.prompt -= old.prompt;
+            this.cacheWindow.read -= old.read;
+        }
+        this.cacheWindow.prompt += prompt;
+        this.cacheWindow.read += read;
+        this.cacheWindow.turns = ring.length;
+    }
+
+    // ------------------------------------------------------------------
+    // #163 D9-04：前缀漂移探针（`.ai ctx debug` 打开；默认关闭，零成本）
+    // ------------------------------------------------------------------
+
+    /** 探针开关（`.ai ctx debug` 切换；运行时，不落盘） */
+    prefixProbeEnabled = false;
+    /** 上轮已发送区的消息哈希（只存短哈希，不存整串） */
+    prefixProbe: { count: number; hashes: string[]; throughSeq: number; firstDiffIndex: number | null } =
+        { count: 0, hashes: [], throughSeq: 0, firstDiffIndex: null };
     /**
      * **持久化**：按端点记录最近一条真实用户消息的原始 `rawId`（A12）。
      * 定时/自主/事件触发时用合成的 msg 没有 rawId，导致"开了回复引用却没有引用"；
@@ -437,6 +546,22 @@ export class Session {
         if (keys.length > 8) {
             for (const key of keys.slice(0, keys.length - 8)) delete this.lastMsgRef[key];
         }
+    }
+
+    /**
+     * 最近一条已入库事件的发生时间（秒）；0=空会话。
+     * 供 `[wake]` marker 的 `[gap]` 相对量使用（wake 入口拿不到投影时用它算"距最近一条消息多久"）。
+     */
+    lastMessageAt(): number {
+        const v2 = this.contextV2;
+        if (v2) {
+            const events = v2.snapshot().events;
+            if (events.length > 0) return Number(events[events.length - 1].at || 0);
+            return 0;
+        }
+        const messages = this.context.messages;
+        const items = (messages[messages.length - 1] as any)?.contentItems || [];
+        return Number(items[items.length - 1]?.time || 0);
     }
 
     async handleReceipt(ctx: seal.MsgContext, msg: seal.Message, messageArray: MessageSegment[], opts?: { updateRef?: boolean }) {

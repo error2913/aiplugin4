@@ -13,6 +13,9 @@ npm install                 # 安装依赖
 npm run build               # 生产构建 → dist/aiplugin4.js（头部拼接 header.txt）
 npm run build-dev           # 开发构建 → dev/aiplugin4.js（带 sourcemap）
 npm run lint                # ESLint 检查 src/**/*.ts
+npm run lint:prefix         # 前缀纯度扫描（宽松：报告可疑点，陈旧白名单只作提示）
+npm run lint:prefix:strict  # 前缀纯度扫描（严格：CI 用，陈旧白名单也算失败）
+npm run lint:prefix:selftest # 自测前缀纯度守卫本身（规则必红 / 上下文锚收窄 / 陈旧白名单可检出）
 npx tsc --noEmit            # 类型检查（直跑 tsconfig，不要加 --strict 覆盖）
 npm run smoke               # 冒烟：Node 中用 seal 桩加载产物
 npm run test:unit           # 单元测试（esbuild 打包 scripts/unit-test-*.ts）
@@ -35,7 +38,7 @@ npm run docs:manifest       # 文档清单（docs-site/manifest.js ↔ docs/ccdo
 npm run docs:build          # 构建文档站点（需 mkdocs）
 ```
 
-改完核心逻辑建议执行 `npm run build && npm run smoke`；提交前至少跑 `npx tsc --noEmit`、`npm run lint`、`npm run test:unit`、`npm run deps:check`。
+改完核心逻辑建议执行 `npm run build && npm run smoke`；提交前至少跑 `npx tsc --noEmit`、`npm run lint`、`npm run test:unit`、`npm run deps:check`、`npm run lint:prefix`。
 
 ## 代码导航
 
@@ -74,6 +77,8 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 15. **大文件按叶子模块拆**：单文件单一职责；拆分后原 API 保留同名委派/`re-export`，外部 import 零改动；每步跑全量验证。
 16. **新增对外 API**（`globalThis.aiplugin4`）同步更新 `docs/07-开发指南.md` 的 API 表格与示例。
 17. **方案/审查/实验/临时分析禁止进入 `docs/`**：放 `.dev/`（gitignore）或 PR 描述；`docs/` 只保留稳定知识库，结构必须与既有编号/插件架构章节一致，不新增插件架构之外的二级章节；实现完成后把最终行为并入对应 02/03/04/05/06/09。
+18. **请求体渲染路径上不许有活字节**（#163 前缀缓存）：`src/context/view/**` 与 `src/utils/message.ts` 里不得出现 `Date.now()` / `new Date()` / `performance.now()`、活读 session/user/tool 开关、模板拼接动态段 —— 任何随轮次变化的字节都会打断前缀缓存（R1）。渲染只读事件内**冻结字段**，时间/名字/估算全部注入。用 `npm run lint:prefix` 自查（`scripts/check-prefix-purity.mjs`，规则 `runtime-clock`/`runtime-date`/`perf-clock`/`live-user`/`seal-template`/`aux-registry`）；确属设计例外（如 `resolveUserName` 旧数据回落活名）加进脚本的 ALLOWLIST 并写明理由。CI 用 `lint:prefix:strict`（陈旧白名单也算失败）。
+19. **`src/core/prefix_boot.ts` 必须留在 L0**：它的读者是 `utils/message.ts`（L2）与 `index.ts`（L4）；挪进 `session/`（L3）会造出 L2 → L3 反向依赖，`npm run deps:check` 直接拒。同理，跨层共享的小状态优先放 `core/`。
 
 ## 开发完成检查清单
 
@@ -94,7 +99,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 
 ## CI 工作流
 
-- `_check.yml`：可复用质量门禁（`workflow_call`）——版本/changelog/默认值一致性、lint、`tsc --noEmit`、单测、依赖边界、`package:check`、冒烟。
+- `_check.yml`：可复用质量门禁（`workflow_call`）——版本/changelog/默认值一致性、lint、**前缀纯度（`lint:prefix:strict`）**、`tsc --noEmit`、单测、依赖边界、`package:check`、冒烟。前缀纯度步骤用 strict 模式：白名单失效也算失败（否则「改造没做完也照样绿」）。
 - `build-check.yml`：push 到 main / `refactor/**` 及 PR 时调用 `_check.yml`。
 - `docs.yml`：文档变更时构建站点并校验清单/链接，push main 发布 Pages。
 - `release.yml`：推送 `v<版本>` 标签触发发布（流程见上）。
@@ -103,13 +108,15 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 
 - 本地冒烟：`npm run build && npm run smoke`。
 - 单测/模拟：`npm run test:unit`、`npm run sim`、`npm run sim:matrix`、`npm run fuzz`、`npm run test:ob11`（共享 seal 桩在 `scripts/harness/seal-env.cjs`，新增 seal API 只改这一处）。
+- #163 相关新增入口：`scripts/unit-test-prefix-obs.ts`（rebase 记账/白名单原因/缓存窗口滚动/漂移探针/注入块状态视图/`config:<key>` 指纹基线语义）、`scripts/unit-test-injection-contract.ts`（注入块渲染位置/去重判定/索引 memo/释放 token 扣减/写块四步顺序的纯函数契约）、`scripts/unit-test-injection-plan.ts`（每轮接线层：四种早退、写块、稳态零注入、provider 异常分流）、`scripts/unit-test-injection-providers.ts`（注入预算三值与 provider 行为）、`scripts/unit-test-archive-tools.ts`（工具面恒定 `JSON.stringify` 逐字节相等 / 归档注入口径 `T`/`selectCut`/`selectMarkForTarget`/`selectMarkTo` / `L` 单一实现）、`scripts/unit-test-time-inject.ts`（时间注入格式与偏移换算）、`scripts/unit-test-quote.ts`（引用 ID 解析口径）。
 - 海豹面板 / QQ 环境测试：使用 Codex 技能 `aiplugin4-test-suite`（全量/单项/重载/配置调试用例，技能本体在 `skills/aiplugin4-test-suite/`），面板自动化与 qqmcp 复用 `sealdice-plugin-dev` 技能。
 - 面板 API 登录注意：新版海豹 signin 不是明文密码——先 `GET /sd-api/signin/salt` 拿盐，密码经 PBKDF2-SHA512(password, salt, 1000, 32) 哈希后拼成 `base64("v01"+salt+迭代数+derived)` 提交（本机工具脚本见 `.dev/panel-api.ps1`、`.dev/sign-hash.mjs`，`.dev/` 已 gitignore）。
 
 ## 常见坑速查
 
 - 不要用 `tsc --strict` 覆盖 tsconfig 的严格选项（会静默吞掉联合类型未收窄之类的错误）。
-- `deps:check` 报「未分类文件」= 新目录没配 `LAYER_RULES`；报「新增跨层依赖」= 低层 import 高层，改端口注入或下沉叶子。
+- `deps:check` 报「未分类文件」= 新目录没配 `LAYER_RULES`；报「新增跨层依赖」= 低层 import 高层，改端口注入或下沉叶子（例：`core/prefix_boot.ts` 就是为避开 L2 → L3 反向依赖才放 L0 的）。
+- **前缀纯度门禁**（4.32.0 / #163）：`npm run lint:prefix` 宽松（可疑点只报告）、`npm run lint:prefix:strict` 严格（**白名单失效也算失败**）、`npm run lint:prefix:selftest` 自测守卫自身（规则必红 / 上下文锚必收窄 / 陈旧白名单可检出）。改 `src/context/view/**` 或 `src/utils/message.ts` 必跑。
 - PowerShell：主环境已是 pwsh 7（UTF-8）；含中文的 `.ps1` 保留 BOM（5.1 按 ANSI 解析会乱码）。
 - 无 gh CLI 时操作 GitHub：用 `git credential fill`（.NET Process 写 stdin）+ REST API，token 不要打印。
 - 模板仓库 `sealdice-js-ext-template` 与本仓库的 `release.yml` 都不要带 `on.pull_request`。

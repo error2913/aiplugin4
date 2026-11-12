@@ -8,7 +8,7 @@ import type { ContextService } from "./service";
 import { applyVisibility, buildRecordIndex } from "./view/records";
 import { segmentUnits } from "./view/units";
 
-export type CtxAction = 'status' | 'archive' | 'hide' | 'purge' | 'set' | 'name' | 'repair' | 'help';
+export type CtxAction = 'status' | 'archive' | 'hide' | 'purge' | 'set' | 'name' | 'repair' | 'help' | 'debug';
 
 export interface ParsedCtxCommand {
     action: CtxAction;
@@ -35,6 +35,22 @@ export interface CtxSessionLike {
         setV2BudgetCap?(tokens: number | null): void;
         readonly v2BudgetCapValue?: number | null;
     };
+    /**
+     * 前缀 rebase 记账（#163 REQ-D7-06 ③④）。
+     *
+     * 只声明可选方法：`CtxSessionLike` 是命令层的结构类型，游离/旧会话可能没有实现；
+     * 缺省时静默跳过（观测缺失不影响正确性，水位本身已落盘）。
+     */
+    notePrefixRebase?(reason: string, throughSeq: number): void;
+    /** 前缀 rebase 记账（#163 REQ-D9-01：`.ai ctx status` 展示前缀稳定性） */
+    prefixRebase?: { count: number; reason: string; at: number; throughSeq: number };
+    /** 前缀漂移探针开关与结果（#163 REQ-D9-04） */
+    prefixProbeEnabled?: boolean;
+    prefixProbe?: { count: number; hashes: string[]; throughSeq: number; firstDiffIndex: number | null };
+    /** 每会话缓存命中率窗口（#163 REQ-D9-03） */
+    cacheWindow?: { turns: number; prompt: number; read: number };
+    /** 本轮注入被跳过的条目数（#163 REQ-D3；当前实现恒为 0，保留展示口径） */
+    injectionsSkipped?: number;
 }
 
 const HIDE_TARGETS: readonly HideTarget[] = ['user', 'assistant', 'all'];
@@ -49,6 +65,7 @@ const HELP = [
     '  set [budget=<tokens>] [retain=<1-100>]|clr  本会话预算/保留强度（仅邀请者）',
     '  name status|set nick|card|mod <0-2>  上下文名字（仅邀请者）',
     '  repair                  检查并修复上下文索引',
+    '  debug                   切换前缀漂移探针（开发排查用）',
     '  help [子命令]           查看帮助',
 ].join('\n');
 
@@ -64,6 +81,7 @@ const TOPIC_HELP: Record<string, string> = {
     set: '【.ai ctx set [budget=<tokens>] [retain=<1-100>]|clr】本会话覆盖上下文预算与保留强度；budget=0 表示跟随模型窗口，clr 恢复默认。',
     name: '【.ai ctx name status】查看名字；【.ai ctx name set nick|card】按昵称/群名片更新；【.ai ctx name mod 0|1|2】自动修改规则。',
     repair: '【.ai ctx repair】检查并修复上下文索引（异常时使用）。',
+    debug: '【.ai ctx debug】切换前缀漂移探针：开启后每轮编译会比对「上一轮已发送区」的消息哈希，并在状态里报告首个差异位置（开发排查用，默认关闭）。',
 };
 
 export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
@@ -76,6 +94,8 @@ export function parseCtxCommand(args: readonly string[]): ParsedCtxCommand {
     if (head === 'status') return { action: 'status' };
     if (head === 'archive') return { action: 'archive' };
     if (head === 'repair') return { action: 'repair' };
+    // #163 REQ-D9-04：`debug` 切换前缀漂移探针（开/关 + 当轮结果展示）
+    if (head === 'debug') return { action: 'debug' };
     if (head === 'hide') {
         const raw = (rest[0] || 'all').toLowerCase();
         const target = (HIDE_TARGETS as readonly string[]).includes(raw) ? raw as HideTarget : null;
@@ -153,6 +173,29 @@ export function formatCtxStatus(input: CtxCommandInput): string {
         lines.push(`总结：标记块待完成（至 e:${input.archive.mark.toSeq}）`);
     }
     lines.push(`原文窗口：约 ${Math.max(0, stats.unarchivedTokens)} token（未归档）`);
+    // —— #163 REQ-D9-01 新增四行：前缀稳定性 / 注入 / 守卫 / 缓存命中率 ——
+    // 全部只读（不触发编译或归档），且每个数据源都可缺省（旧会话/未接入 v2）
+    const rebase = input.session?.prefixRebase;
+    lines.push(rebase && rebase.count > 0
+        ? `前缀：已重建 ${rebase.count} 次（最近原因：${rebase.reason}）`
+        : '前缀：稳定');
+    const blocks = input.archive?.blocks ?? [];
+    const activeBlocks = blocks.filter(b => b.state === 'active').length;
+    lines.push(`注入：活动 ${activeBlocks} 块 / ${Math.max(0, input.archive?.activeInjectTokens ?? 0)} token / 跳过 ${input.session?.injectionsSkipped ?? 0}`);
+    const compiled = input.service.lastCompile();
+    if (!compiled) {
+        // 无统计 ≠ 校验通过：重载后编译统计为空，谎报"通过"会掩盖问题
+        lines.push('前缀守卫：-');
+    } else {
+        const drift = input.session?.prefixProbeEnabled ? input.session.prefixProbe?.firstDiffIndex : null;
+        lines.push(drift === undefined || drift === null
+            ? '前缀守卫：上次校验通过'
+            : `前缀守卫：首差异位置 ${drift}`);
+    }
+    const cw = input.session?.cacheWindow;
+    lines.push(cw && cw.turns > 0
+        ? `缓存：命中率 ${((cw.read / Math.max(1, cw.prompt)) * 100).toFixed(1)}%（近 ${cw.turns} 轮）`
+        : '缓存：命中率 -（本会话暂无数据）');
     const archivedTokens = Math.max(0, stats.unsummarizedTokens - stats.unarchivedTokens);
     if (stats.archivedThrough > 0) {
         const pendingSummary = stats.archivedThrough > stats.summarizedThrough;
@@ -260,7 +303,11 @@ export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandR
         }
         case 'hide': {
             const target = parsed.target ?? 'all';
+            const head = input.service.head();
+            const fromSeq = Math.max(0, Math.floor(Number(head.archivedThrough) || 0));
             hideEvents(input.service.getStore(), target, input.now ? input.now() : undefined);
+            // #163 REQ-D7-06 ④：hide 会改变历史渲染字节（被隐藏段不再渲染）⇒ 属白名单 rebase
+            input.session?.notePrefixRebase?.('redact', fromSeq);
             const flushed = await input.service.flush();
             return {
                 text: flushed.ok ? `${HIDE_LABEL[target]}已隐藏（原文保留，供审计）` : '已记录隐藏，但保存失败，请稍后重试',
@@ -272,11 +319,26 @@ export async function runCtxCommand(input: CtxCommandInput): Promise<CtxCommandR
                 return { text: '将清除本会话全部上下文，且不可恢复（不影响长期记忆）。\n确认请发送：.ai ctx purge --yes', needsConfirm: true };
             }
             purgeSession(input.sessionId, input.service.head());
+            // #163 REQ-D7-06 ③：purge 清空全部历史 ⇒ 前缀必然从头重建
+            input.session?.notePrefixRebase?.('purge', 0);
             return { text: '已清除本会话上下文；长期记忆不受影响', changed: true, purged: true };
         }
         case 'repair': {
             const head = repairHead(input.sessionId);
             return { text: head ? '上下文索引正常（已检查并修复）' : '上下文索引不存在或无法修复', changed: !!head };
+        }
+        case 'debug': {
+            // #163 REQ-D9-04：探针是纯观测开关，不改变任何行为；关掉时顺带清空上面一轮的哈希
+            const session = input.session;
+            if (!session) return { text: '暂不支持：当前会话未接入 v2 上下文' };
+            if (session.prefixProbeEnabled) {
+                session.prefixProbeEnabled = false;
+                session.prefixProbe = { count: 0, hashes: [], throughSeq: 0, firstDiffIndex: null };
+                return { text: '前缀探针已关闭' };
+            }
+            session.prefixProbeEnabled = true;
+            session.prefixProbe = { count: 0, hashes: [], throughSeq: 0, firstDiffIndex: null };
+            return { text: '前缀探针已开启：下一轮起比对已发送区，状态里会显示首个差异位置' };
         }
         case 'set':
             return runSet(input, parsed);

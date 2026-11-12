@@ -14,6 +14,7 @@ import { getHost } from "../core/host";
 
 import { renderText } from "./content/render";
 import type { ConversationEvent, EventPage } from "./events";
+import { injectionOf } from "./injections";
 import { legacyShardKey } from "./keys";
 import { PageStoreError, readEventPage } from "./log/page_store";
 import type { ContextSnapshot, ContextStore } from "./store";
@@ -158,6 +159,14 @@ export interface GrepOptions {
     toSeq?: number;
     regex?: boolean;
     snippetRadius?: number;
+    /** 事件发生时间下界（Unix 秒，闭区间；按 event.at 过滤，与 fromSeq 语义独立） */
+    timeFrom?: number;
+    /** 事件发生时间上界（Unix 秒，闭区间） */
+    timeTo?: number;
+    /** 只保留该发言人的事件（user 事件 uid 精确匹配，如 QQ:123） */
+    fromUid?: string;
+    /** 只保留这些事件 kind（user/assistant/tool_call/tool_result/event） */
+    kinds?: string[];
 }
 
 export interface GrepHit {
@@ -243,8 +252,12 @@ export function eventRecallText(event: ConversationEvent, index?: RecordIndex): 
             return `[tool_call:${event.name}${event.callId ? `#${event.callId}` : ''}] ${body || event.args || ''}`.trim();
         case 'tool_result':
             return `[tool_result${event.name ? `:${event.name}` : ''}${event.callId ? `#${event.callId}` : ''}] ${body}`.trim();
-        case 'event':
+        case 'event': {
+            // #163 REQ-D3-16：注入块用 `[injection:<kind>]` 前缀（工具结果文本，不影响历史字节）
+            const inj = injectionOf(event);
+            if (inj) return `[injection:${inj.kind}] ${body}`.trim();
             return `[event:${event.systemName}] ${body}`.trim();
+        }
         default:
             return body;
     }
@@ -342,6 +355,13 @@ function eventMsgId(event: ConversationEvent): string {
     if (event.kind !== 'user' && event.kind !== 'assistant') return '';
     const id = (event as { msgId?: unknown }).msgId;
     return typeof id === 'string' ? id : '';
+}
+
+/** 事件发言人 uid（仅 user 事件有；其余为空串） */
+function eventUid(event: ConversationEvent): string {
+    if (event.kind !== 'user') return '';
+    const uid = (event as { uid?: unknown }).uid;
+    return typeof uid === 'string' ? uid : '';
 }
 
 /** 把一个事件按预算追加到 readRaw 结果；返回 false 表示已达预算（cursor 已设置） */
@@ -521,7 +541,11 @@ function isMsgIdMatch(event: ConversationEvent, msgId: string): boolean {
     return false;
 }
 
-function findEventByMsgId(
+/**
+ * 按 msg_id 找事件（REQ-D6-01）：先扫内存快照（新→旧），再按 MSG_LOOKUP_MAX_PAGES 上限回扫落盘页。
+ * 由私有改为导出，供 ContextService.findEventByMsgId（引用展开）复用同一套实现。
+ */
+export function findEventByMsgId(
     store: ContextStore,
     snapshot: ContextSnapshot,
     msgId: string,
@@ -835,8 +859,8 @@ function buildGrepResult(
     if (deletedThrough > 0) notes.push(`originals up to e:${deletedThrough} were deleted (归档保留原文=关)`);
     const skipped = uniqueSorted(skippedPages);
     if (skipped.length > 0) notes.push(pageSummary(skipped));
-    // 扫描顺序是从新到旧；输出统一改为按时间（seq）升序，便于模型按时间线理解
-    const ordered = hits.slice().sort((a, b) => a.seq - b.seq);
+    // 扫描顺序是从新到旧；输出保持「最新在前」（降序，REQ-D5-02）——历史已无 [msg_id]，先看到最新命中更贴近「刚才那条」的检索心智
+    const ordered = hits.slice().sort((a, b) => b.seq - a.seq);
     return {
         hits: ordered,
         nextCursor,
@@ -868,6 +892,15 @@ export function grepRaw(
     const toSeq = options.toSeq === undefined ? Number.MAX_SAFE_INTEGER : options.toSeq;
     if (!isInt(fromSeq) || fromSeq < 0) throw new RecallError('INVALID_ARGUMENT', 'fromSeq must be an integer >= 0');
     if (!isInt(toSeq) || toSeq < 1) throw new RecallError('INVALID_ARGUMENT', 'toSeq must be an integer >= 1');
+    // 时间区间（Unix 秒，闭区间）：与 fromSeq/toSeq 语义独立，可同时使用（AND）
+    const timeFrom = options.timeFrom === undefined ? null : options.timeFrom;
+    const timeTo = options.timeTo === undefined ? null : options.timeTo;
+    if (timeFrom !== null && (!isInt(timeFrom) || timeFrom < 0)) throw new RecallError('INVALID_ARGUMENT', 'timeFrom must be an integer >= 0');
+    if (timeTo !== null && (!isInt(timeTo) || timeTo < 0)) throw new RecallError('INVALID_ARGUMENT', 'timeTo must be an integer >= 0');
+    if (timeFrom !== null && timeTo !== null && timeFrom > timeTo) throw new RecallError('INVALID_ARGUMENT', 'timeFrom must be <= timeTo');
+    // 发言人过滤（仅 user 事件）与事件 kind 过滤
+    const fromUid = typeof options.fromUid === 'string' && options.fromUid.trim() ? options.fromUid.trim() : '';
+    const kinds = Array.isArray(options.kinds) && options.kinds.length > 0 ? options.kinds : null;
 
     const index = buildRecordIndex(snapshot.records);
     const events = snapshot.events.slice().sort((a, b) => a.seq - b.seq);
@@ -888,6 +921,12 @@ export function grepRaw(
             hidden++;
             return true;
         }
+        // 前置过滤：命中过滤条件时 return true（继续扫描），不计入 hidden（hidden 专指 redact/supersede/epoch 不可见）
+        const at = Number((event as { at?: number }).at ?? 0);
+        if (timeFrom !== null && at < timeFrom) return true;
+        if (timeTo !== null && at > timeTo) return true;
+        if (kinds !== null && !kinds.includes(event.kind)) return true;
+        if (fromUid && eventUid(event) !== fromUid) return true;
         const text = eventRecallText(event, index);
         const match = matcher(text);
         if (!match) return true;

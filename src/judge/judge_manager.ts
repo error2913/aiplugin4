@@ -8,6 +8,7 @@ import { getAuxLlm } from "../core/ports/aux_llm";
 import { cancelJudgeWait, scheduleJudgeWait, setJudgeWaitFinisher } from "../core/ports/judge_wait";
 import { logger } from "../logger";
 import type { Session } from "../session/session";
+import { writeWakeMarker } from "../trigger/wake";
 import { buildContent, getRoleSetting } from "../utils/message";
 import { fmtDate } from "../utils/string";
 import { withTimeout } from "../utils/timeout";
@@ -453,6 +454,8 @@ export class JudgeManager {
             return;
         }
         if (decision.action === 'SPEAK') {
+            // 判定 SPEAK 可能发生在消息到达很久之后，且本轮无新增事件 ⇒ 先写 `[wake]` marker（本轮的"现在"）
+            await writeWakeMarker(session, 'judge');
             const outcome = await session.chat(ctx, msg, '评分触发');
             if (outcome !== 'fired') {
                 log.info('SPEAK 未真正起轮（' + outcome + '）');

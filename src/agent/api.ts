@@ -11,6 +11,7 @@ import { SessionType } from "../session/types";
 import { toolMap } from "../tool/registry";
 import Tool, { EXTERNAL_CATEGORY } from "../tool/tool";
 import { ToolInfo } from "../tool/types";
+import { writeWakeMarker } from "../trigger/wake";
 
 import Agent from "./agent";
 
@@ -115,6 +116,8 @@ export function registerAgentApi(): void {
             const session = agent.sessionService.getSession(sessionId);
             // 外部插件 API 不受会话 AI 总闸影响（作者 Q8：外部不受控）。
             // 注意 `bypassGate` **不绕过用量限制**：配额是资源上限而非会话开关，此处按会话维度照常判定。
+            // 该入口没有新增事件 ⇒ 先写 `[wake]` marker（历史 [time] 已隐藏，marker 是本轮唯一"现在"）。
+            await writeWakeMarker(session, 'external');
             await session.chat(ctx, msg, options.reason || '外部插件调用', options.toolChoice, { bypassGate: true });
         },
         registerTool: (info: ToolInfo, options: RegisterToolOptions = {}) => {

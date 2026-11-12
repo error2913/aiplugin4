@@ -14,6 +14,7 @@ import Image from "../../../resource/image";
 import type { Session } from "../../../session/session";
 import { stripRawMarkers } from "../../../utils/raw_marker";
 import { fmtDate } from "../../../utils/string";
+import { normalizeUserId, platformOf } from "../../../utils/target_id";
 import Tool from "../../tool";
 
 /** 单次返回总长度上限（请求体预算，非留存限制）：远小于各截断阈值，避免回读结果再次被截断 */
@@ -42,6 +43,16 @@ function splitLines(raw: string): string[] {
 function toInt(value: unknown, fallback: number): number {
     const n = parseInt(String(value), 10);
     return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * from_uid 归一：接受 'QQ:123456' / '123456' / 数字；非 QQ 平台保留原串（platformOf 兜底）。
+ * 账本里 user 事件的 uid 是带平台前缀的（QQ:123），裸号不归一会精确匹配落空。
+ */
+function normalizeUidArg(raw: unknown, ctx: seal.MsgContext): string | undefined {
+    const text = String(raw ?? '').trim();
+    if (!text) return undefined;
+    return normalizeUserId(text, platformOf(ctx)) || text;
 }
 
 function capArgs(count?: unknown, ctxLines?: unknown, maxChars?: unknown): { entryLimit: number; ctxLimit: number; cap: number } {
@@ -597,13 +608,13 @@ export function registerRawTools() {
         type: 'function',
         function: {
             name: 'grep_raw',
-            description: 'Search the raw context text for keywords (including history already covered by summaries). Results are ordered by time (ascending) and each hit carries its send time and message ID (when present), plus a read_raw pointer; control with regex/from_seq/to_seq/max_pages/cursor/count. kind filter parameters are legacy-session-only and can be ignored.',
+            description: 'Search the raw context text for keywords (including history already covered by summaries). Results are ordered by time (newest first) and each hit carries its send time and message ID (when present), plus a read_raw pointer; control with regex/from_seq/to_seq/time_from/time_to/from_uid/kind/max_pages/cursor/count.',
             parameters: {
                 type: 'object',
                 properties: {
                     kind: {
                         type: 'string',
-                        description: 'Legacy-session compatibility only; can be ignored'
+                        description: 'Event kind filter for v2 sessions: user/assistant/system/tool/event; legacy sessions keep the old kind semantics'
                     },
                     pattern: {
                         type: 'string',
@@ -641,6 +652,18 @@ export function registerRawTools() {
                         type: 'integer',
                         description: 'Optional: only search seq <= to_seq'
                     },
+                    time_from: {
+                        type: 'integer',
+                        description: 'Optional: only events at/after this Unix time (seconds, inclusive)'
+                    },
+                    time_to: {
+                        type: 'integer',
+                        description: 'Optional: only events at/before this Unix time (seconds, inclusive)'
+                    },
+                    from_uid: {
+                        type: 'string',
+                        description: 'Optional: only this sender (user id, e.g. QQ:123456); user events only'
+                    },
                     max_pages: {
                         type: 'integer',
                         description: 'Optional: max event pages to scan per call'
@@ -654,8 +677,8 @@ export function registerRawTools() {
             }
         }
     });
-    grepTool.solve = async (_, __, session, args) => {
-        const { kind, pattern, tool_name, event_type, count, context_lines, max_chars, cursor, regex, from_seq, to_seq, max_pages } = (args || {}) as Record<string, unknown>;
+    grepTool.solve = async (ctx, __, session, args) => {
+        const { kind, pattern, tool_name, event_type, count, context_lines, max_chars, cursor, regex, from_seq, to_seq, time_from, time_to, from_uid, max_pages } = (args || {}) as Record<string, unknown>;
         if (session.contextV2) {
             const text = String(pattern ?? '');
             if (!text) return 'grep_raw 需要 pattern；查看状态可用 .ai ctx，按位置读取原文用 read_raw id=e:<seq>';
@@ -665,6 +688,10 @@ export function registerRawTools() {
                     regex: regex === true,
                     from_seq: from_seq as number | undefined,
                     to_seq: to_seq as number | undefined,
+                    time_from: time_from as number | undefined,
+                    time_to: time_to as number | undefined,
+                    from_uid: normalizeUidArg(from_uid, ctx),
+                    kind: kind as string | undefined,
                     max_pages: max_pages as number | undefined,
                     max_hits: count as number | undefined,
                     cursor: cursor as string | undefined,

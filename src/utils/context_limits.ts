@@ -17,12 +17,20 @@ export const COMPACT_ARCHIVE_MAX_BATCHES = 200;
 export const SUMMARY_MAX_CHARS = 4000;
 /** 记忆桥后台抽取的积压水位（token）；原「摘要水位」默认行为等价常量 */
 export const MEMORY_WATERMARK_TOKENS = 6000;
-/** 时间锚点：与上一条已显示时间相隔多少秒时补 `[time]` */
-export const TAG_ANCHOR_GAP_SEC = 3600;
-/** 时间锚点：每经过多少条 user/assistant 消息至少显示一次 `[time]` */
-export const TAG_ANCHOR_EVERY_MESSAGES = 100;
+// #163 D2（PR-09）：`TAG_ANCHOR_GAP_SEC` / `TAG_ANCHOR_EVERY_MESSAGES` 已删除 ——
+// 历史层不再按"距上次显示多久 / 隔了多少条"决定是否渲染 `[time]`，因为它让同一段已发送
+// 历史的字节随窗口位置漂移（正是本 issue 要消灭的 P6）。时间改由三处提供：
+// `kind:'time'` 注入块、`get_time` 工具、`renderSystemEvent` 的 `[time]`（wake 等系统起轮）。
 /** 旧回退路径（无事件账本）用户消息纯代码截断的 token 上限 */
 export const LEGACY_USER_MESSAGE_MAX_TOKENS = 8192;
+/**
+ * 单事件渲染的**固定** token 上限（#163 REQ-D2-07）。
+ *
+ * 删掉预算选择器后，单元级截断不再由 `available` 决定（那会让同一事件的渲染字节随本轮
+ * 预算抖动而变，违反 R1）。超限事件一律按这个常量截断并带 `read_raw` 指针 ——
+ * 常量恒定 ⇒ 同一事件在任何一轮渲染出的字节都相同。
+ */
+export const HISTORY_EVENT_MAX_TOKENS = LEGACY_USER_MESSAGE_MAX_TOKENS;
 
 /** 保留强度归一：1-100 之外的输入回退默认值（不静默抛错，由配置层决定是否 warning） */
 export function normalizeRetainPercent(raw: unknown): number {
@@ -42,6 +50,21 @@ export function retainedTargetTokens(permanentBudget: number, percent: number): 
 
 /** 对话后总结触发系数（契约 k，写死，不做配置） */
 export const ARCHIVE_TRIGGER_RATIO = 0.95;
+
+// ---------------- 增量注入三层额度（#163 REQ-D3-29） ----------------
+//
+// 三层是**包含**关系：单轮增量 (512) ⊂ 活动总量 (4096) ⊂ 硬上界 (5120)。
+// 三者都**不开放配置**：改动额度会改变归档时机 ⇒ 每次调参都要一次 rebase，
+// 且这三个值是"缓存效率 × 预算冲击"的平衡点，不该让用户调（d3b G.1）。
+
+/** 活动注入块总量上界（token）：超过**触发归档**，绝不跳过注入 */
+export const INJECT_ACTIVE_WINDOW_TOKENS = 4096;
+/** 单轮注入增量上界（token）：超出部分**拆到后续轮次**，绝不截断条目正文（d3b G.2） */
+export const INJECT_PER_TURN_MAX_TOKENS = 512;
+/** 冷启动（新会话首次注入）总量上界（token）：可拆 4×512 分批 */
+export const INJECT_COLD_START_MAX_TOKENS = 2048;
+/** 活动块总量硬上界：只用于断言/告警（超了说明归档没跟上），不用于丢弃 */
+export const INJECT_ACTIVE_MAX_TOKENS = INJECT_ACTIVE_WINDOW_TOKENS + 1024;
 
 /** v7 双水位：L=消息上下文预算（已扣固定提示词）、A=保留目标、B=对话触发线、C=待机归档线 */
 export interface ArchiveWatermarks {

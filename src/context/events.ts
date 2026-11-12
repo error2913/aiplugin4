@@ -39,10 +39,32 @@ export interface EventBase {
 
 export interface UserEvent extends EventBase {
     kind: 'user';
-    /** 机器人自身消息标记；不再依赖 lastReply 字符串比对 */
-    origin?: 'self';
+    /**
+     * 来源标记：self=机器人自录消息；quote=引用回复展开出的被引原文（REQ-D6-04）。
+     * 注意 records.ts 的 redact 判定按 `origin !== 'self'` 归 user 侧，quote 因此可被"隐藏用户消息"覆盖。
+     */
+    origin?: 'self' | 'quote';
     uid: string;
     msgId: string;
+    parts: Part[];
+    /** 写入时冻结的显示名（REQ-D6-05；旧数据缺失时渲染回退活动昵称） */
+    fromName?: string;
+    /** 引用关系：本事件是"被引用的原始消息"，值为原 msgId（REQ-D6-05；语义标签，不受 msg_id 门控影响） */
+    quoteOf?: string;
+}
+
+/**
+ * 引用展开结果（REQ-D6-01 ~ D6-05）：被引原始消息的冻结快照，不含任何渲染。
+ * 渲染（`[from:<name>][quote_of:<id>]`）由 view/compile 负责，数据层只负责冻结内容。
+ */
+export interface QuoteDraft {
+    /** 被引消息的 base36 短 id（= UserEvent.msgId = quoteOf 值） */
+    msgId: string;
+    /** 原发言人 UNI-ID（如 QQ:123）；未知时 'unknown'（page_store 要求 uid 非空） */
+    uid: string;
+    /** 写入时冻结的显示名 */
+    fromName: string;
+    /** 原始消息完整 parts（含 {type:'image', ref}，走与普通 user 事件同一写入路径） */
     parts: Part[];
 }
 

@@ -84,7 +84,20 @@ function systemItem(event: ConversationEvent, index: ReturnType<typeof buildReco
         systemName: e.systemName || SYSTEM_NAME.event,
     };
     if (e.eventType !== undefined) item.eventType = e.eventType;
-    if (e.raw !== undefined) item.raw = e.raw;
+    if (e.raw !== undefined) {
+        // #163 REQ-D3-15 ⑤：剥掉 `raw.injection` 元数据，事件本身仍按 system 项渲染
+        //（旧消费者可见正文，不泄漏内部账本字段）
+        const raw = e.raw as Record<string, unknown>;
+        if (raw && typeof raw === 'object' && 'injection' in raw) {
+            const rest: Record<string, unknown> = {};
+            for (const key of Object.keys(raw)) {
+                if (key !== 'injection') rest[key] = raw[key];
+            }
+            if (Object.keys(rest).length > 0) item.raw = rest;
+        } else {
+            item.raw = e.raw;
+        }
+    }
     return item;
 }
 
