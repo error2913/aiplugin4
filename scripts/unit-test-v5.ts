@@ -487,7 +487,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
      *
      * 分层验证：
      *   A. 适配层 → 候选（本文件可独立验证）
-     *   B. 真正跑 Model（在 unit-test-entry.ts 的 testPurposeExactTypeSelection，需要 seal 桩）
+     *   B. 真正跑 Model（在 scripts/unit-test-media.ts 的 testPurposeExactTypeSelection，需要 seal 桩）
      */
     testPurposeResolvesByExactTypeNotByOrder(): void {
         const cfg: V5Config = {

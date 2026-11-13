@@ -440,7 +440,11 @@ export default class Tool {
                 }
                 list.push(tool.toolInfo);
             }
-            Tool.nativeToolsCache = list;
+            // **空结果不进缓存**：元工具尚未注册时缓存空数组，会让"先被读一次、之后才注册"的
+            // 启动时序（以及先 reset 再部分注册的测试）永远只能拿到空工具面。
+            // 非空才缓存，既保住"同一数组引用 ⇒ 字节恒定"，又允许注册补齐后自愈。
+            if (list.length > 0) Tool.nativeToolsCache = list;
+            return list;
         }
         return Tool.nativeToolsCache;
     }
@@ -470,7 +474,10 @@ export default class Tool {
 let nativeToolsJsonCache: string | null = null;
 export function nativeRequestToolsJson(): string {
     if (nativeToolsJsonCache === null) {
-        nativeToolsJsonCache = JSON.stringify(Tool.getNativeRequestTools());
+        const json = JSON.stringify(Tool.getNativeRequestTools());
+        // 与 getNativeRequestTools 同上：空工具面的 "[]" 不入缓存，元工具注册后能自愈
+        if (json !== '[]') nativeToolsJsonCache = json;
+        return json;
     }
     return nativeToolsJsonCache;
 }

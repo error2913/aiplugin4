@@ -7,7 +7,7 @@ import "./test-host";
 import Config, { ext } from "../src/config/config";
 Config.registerConfig();
 
-import Image from "../src/resource/image";
+import Image, { resetBtoaWarnForTest } from "../src/resource/image";
 import { ImageGC } from "../src/resource/image_gc";
 import { ImageHost, isLoopbackUrl } from "../src/resource/image_host";
 import { ImageIndex } from "../src/resource/image_index";
@@ -57,6 +57,10 @@ function resetConfigCache(): void {
 }
 
 function useHost(enabled = true, token = 'tok-123', url = BACKEND, publicUrl = ''): void {
+    // 每个用例都从「健康、无残留熔断/能力探测」的后端开始：熔断态是 bundle 内静态，
+    // 前一个用例（或乱序执行时的任意用例）留下的熔断会让这里的首个请求被直接跳过（calls 空）
+    ImageHost.resetHealthForTest();
+    ImageHost.resetUploadSlotsForTest();
     TC.stringConfigs['后端配置'] = JSON.stringify({
         version: 1,
         backends: {
@@ -84,6 +88,18 @@ function captureStorage(): void {
     stored = {};
     (ext as any).storageSet = (key: string, value: string) => { stored[key] = value; };
     (ext as any).storageGet = (key: string) => stored[key] ?? '';
+}
+
+/**
+ * 隔离 `Image.imageMap`：`markModelDownloadFailures` 按设计扫描**整张**注册表，
+ * 而前面的用例（createUrlImage → 异步入库 captureToHost）可能已经把别的图写成
+ * `hostedId = 'abc123'` 留在表里，于是本用例的 `marked`/`excludeIds` 混进无关条目。
+ * 用「临时换成空表 + finally 原样还回」的方式让被检查的行为只面对自己造的图。
+ */
+function isolateImageMap(): () => void {
+    const saved = Image.imageMap;
+    Image.imageMap = {};
+    return () => { Image.imageMap = saved; };
 }
 
 function mockFetch(): void {
@@ -450,6 +466,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         useHost();
         captureStorage();
         mockFetch();
+        const restoreMap = isolateImageMap();
+        Image.resetHostedRefsForTest();
         ImageHost.capabilities = ['model-variant', 'meta'];
         // 20 号方案 P0-C：下载失败只允许内联模型变体（/m/<id>/b64）
         routes = [{ match: (url: string) => url.endsWith('/m/abc123/b64'), data: { base64: 'QUJD', format: 'png', mime: 'image/png', w: 1, h: 1 } }];
@@ -470,6 +488,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ImageHost.resetCapabilitiesForTest();
             restoreFetch();
             restoreHost();
+            restoreMap();
         }
     },
 
@@ -478,6 +497,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         useHost();
         captureStorage();
         mockFetch();
+        const restoreMap = isolateImageMap();
+        Image.resetHostedRefsForTest();
         ImageHost.capabilities = ['model-variant', 'meta'];
         routes = [{ match: (url: string) => url.endsWith('/m/abc123/b64'), status: 404, text: '{"error":"not_found"}' }];
         try {
@@ -495,6 +516,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ImageHost.resetCapabilitiesForTest();
             restoreFetch();
             restoreHost();
+            restoreMap();
         }
     },
 
@@ -503,6 +525,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         useHost();
         captureStorage();
         mockFetch();
+        const restoreMap = isolateImageMap();
+        Image.resetHostedRefsForTest();
         ImageHost.capabilities = ['model-variant', 'meta'];
         TC.intConfigs['单张内联上限KB'] = 1;
         routes = [{
@@ -526,6 +550,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ImageHost.resetCapabilitiesForTest();
             restoreFetch();
             restoreHost();
+            restoreMap();
         }
     },
 
@@ -1528,6 +1553,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origWarn = console.warn;
         console.warn = (...args: any[]) => { warns.push(args.map(a => String(a)).join(' ')); };
         delete (globalThis as any).btoa;
+        // 「只提示一次」是模块级标志：别的用例先触发过就再也看不到这条日志，先复位
+        resetBtoaWarnForTest();
         try {
             const img = new Image();
             img.imageId = 'img_no_btoa';
@@ -1543,6 +1570,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         } finally {
             (globalThis as any).btoa = NODE_BTOA;
             console.warn = origWarn;
+            resetBtoaWarnForTest();
             restoreFetch();
             restoreHost();
         }
@@ -1698,6 +1726,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         useHost();
         captureStorage();
         mockFetch();
+        const restoreMap = isolateImageMap();
+        Image.resetHostedRefsForTest();
         ImageHost.capabilities = ['model-variant'];
         routes = [{ match: (u) => u.endsWith('/i/abc123/b64'), status: 404, text: '{"error":"not_found"}' }];
         try {
@@ -1713,7 +1743,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             img.hostedId = 'abc123';
             img.hostedUrl = '/i/abc123';
             Image.imageMap['img_degraded_gate'] = img;
-            // 注意：imageMap 里可能残留其它用例的同 id 图（本用例只管自己的那张）
+            // isolateImageMap 保证注册表只剩本用例的图
             const res = await Image.markModelDownloadFailures([`${BACKEND}/i/abc123`]);
             assert.equal(res.marked, 0, '熔断期不得判「图床已删」');
             assert.equal(res.excludeIds.includes('img_degraded_gate'), true, '本轮应临时排除');
@@ -1724,6 +1754,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             ImageHost.resetCapabilitiesForTest();
             restoreFetch();
             restoreHost();
+            restoreMap();
         }
     },
 

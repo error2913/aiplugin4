@@ -101,6 +101,15 @@ function useHost(url = 'http://test-host:46680', publicUrl = ''): void {
 
 function restoreHost(): void {
     delete TC.stringConfigs['后端配置'];
+    // useHost() 会显式写入与出厂默认一致的图片限制（桩不注册配置项 → 读成 0）。
+    // 这些键必须一并撤销：残留的「模型图片目标长边=2048」会让后续用例请求 /m/<id>/b64?max=2048，
+    // 与它们自己的路由（endsWith('/m/<id>/b64')）对不上，表现为莫名其妙的 404。
+    delete TC.intConfigs['模型图片单边上限'];
+    delete TC.intConfigs['模型图片目标长边'];
+    delete TC.intConfigs['每轮最多内联图片数'];
+    delete TC.intConfigs['每条工具结果最多升格图片数'];
+    delete TC.boolConfigs['图片被模型拒绝时自动降级'];
+    delete TC.boolConfigs['图片降级通知'];
     (Config as any).cache = {};
     (ImageHost as any).capabilities = [];
     delete (globalThis as any).__MODEL_SOURCE_TEST__;
@@ -382,6 +391,9 @@ export const tests = {
             assert.equal(img.height, 512);
         } finally {
             (globalThis as any).fetch = origFetch;
+            // useHost() 会写入「后端配置」并使 ImageHost.enabled=true：不还原的话后面的用例
+            // （如 media 的落盘链路）会真的去连 test-host 图床，任务永远停在 running。
+            restoreHost();
         }
     },
 };

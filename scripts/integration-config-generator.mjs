@@ -879,7 +879,7 @@ console.log('\n=== J. 官方百炼（兼容模式）生图：不填 URL、不写
 
         // 6) 取数（预设没写 data_path → 靠兜底候选命中官方响应结构）在插件单测里验证：
         //    extractMediaData 所在的 media.ts 依赖 config.ts（模块顶层用 seal），
-        //    无法进这个无 seal 的联测包。见 unit-test-entry.ts 的 testOfficialDashscopeImageShape。
+        //    无法进这个无 seal 的联测包。见 scripts/unit-test-media.ts 的 testMediaResponseParsing。
     }
 }
 // ---------------------------------------------------------------- K. 分类白名单的漂移守卫

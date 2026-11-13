@@ -427,6 +427,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.notEqual(next, first, 'boundary 变 ⇒ 必须 miss（否则归档后仍判 dup）');
         assert.equal(next.byKey.size, 0, '块已释放 ⇒ 不进活动集合');
         assert.equal(next.releasedKeys.get('a'), it1.r, '但必须进 releasedKeys（供 re-inject）');
+
+        // 同键不同会话 ⇒ 必须 miss：块形状相同不代表块内容是同一个会话的
+        const otherScope = { session: 'other' };
+        const other = activeIndexFor(split.injections, split.released, key, null, otherScope);
+        assert.notEqual(other, next, '不同会话即使键相同也必须重建索引');
         resetActiveIndexCache();
     },
 

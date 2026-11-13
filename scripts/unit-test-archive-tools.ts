@@ -1,7 +1,7 @@
 // #163 D8 工具面恒定 + D7/T16 归档预算口径单测（T12 / T16 组）。
 //
 // 为什么单独一个 bundle：这些断言的对照面是「模块级工具 schema 缓存 + ArchiveController 的水位算法」，
-// 与 867KB 的 unit-test-entry.ts 无关；独立入口让失败定位更快。
+// 与按域拆分的 unit-test-*.ts 主入口无关；独立入口让失败定位更快。
 //
 // 覆盖点（对应 .dev/docs-archive/163/exec/d789-archive-tools.md §E）：
 // - E1~E6  D8 工具面恒定：三件套恒定、永不 null、同一数组引用、JSON 字节恒定、token 预留不随开关变；

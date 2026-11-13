@@ -27,6 +27,9 @@ import {
 
 export const tests: Record<string, () => void | Promise<void>> = {};
 
+// 与生产一致：装配期先注册配置（registerConfig 已幂等），不依赖"别的入口先跑过"这种隐式顺序
+Config.registerConfig();
+
 const msg = (role: RequestMessage['role'], content: string, extra: Partial<RequestMessage> = {}): RequestMessage =>
     ({ role, content, ...extra }) as RequestMessage;
 

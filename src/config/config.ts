@@ -66,13 +66,23 @@ interface ConfigCache {
 class _Config {
     static cache: { [K in ConfigKey]?: ConfigCache } = {}
 
+    /** 是否已注册过（registerConfig 会把分区以访问器 defineProperty 到类上，重复定义会抛错） */
+    private static registered = false
+
     static registerConfig() {
+        // 幂等：测试/热重载可能重复调用（多个测试入口各自装配），重复 defineProperty 会抛
+        // TypeError: Cannot redefine property。已注册时只做一次预热，语义不变。
+        if (this.registered) {
+            this.warmup();
+            return;
+        }
         for (const k of Object.keys(configMap) as ConfigKey[]) {
             configMap[k].register();
             Object.defineProperty(this, k, {
                 get: () => this.getCache(k, configMap[k].get)
             })
         }
+        this.registered = true;
         this.warmup();
     }
 

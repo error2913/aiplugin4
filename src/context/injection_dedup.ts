@@ -146,6 +146,14 @@ function stripUpdatedPrefix(text: string): string {
 interface ActiveIndexCache {
     index: ActiveIndex;
     key: ActiveIndexKey;
+    /**
+     * 归属域（调用方传会话 service 引用）。
+     *
+     * 三个键分量都是"块形状"，**不含会话身份**：两个会话的块数/最大 seq/水位恰好相同就会撞键，
+     * 后一个会话会拿到前一个会话的索引 ⇒ 自己的新条目被判 `dup` 而**静默不注入**。
+     * 并发请求（两个群同时说话）下这是真实可达的，所以必须把身份一起纳入命中条件。
+     */
+    scope: unknown;
 }
 
 let cache: ActiveIndexCache | null = null;
@@ -164,14 +172,18 @@ let cacheMisses = 0;
  * - 归档但没释放任何块 ⇒ 三者都不变 ⇒ 命中（这正是 AUDIT-003 要救的关键场景）
  *
  * `dup` / `dup-text` 不写块 ⇒ 集合不变 ⇒ 命中。`updated` 写块 ⇒ count 变 ⇒ miss。
+ *
+ * `scope` 是调用方会话（或 service）引用，仅用于**同键不同会话**的隔离，不参与键分量比较。
  */
 export function activeIndexFor(
     injections: readonly InjectionRef[],
     released: readonly InjectionRef[],
     key: ActiveIndexKey,
     redacts?: readonly RedactLike[] | null,
+    scope?: unknown,
 ): ActiveIndex {
-    if (cache && cache.key.injectionCount === key.injectionCount
+    if (cache && cache.scope === scope
+        && cache.key.injectionCount === key.injectionCount
         && cache.key.injectionMaxSeq === key.injectionMaxSeq
         && cache.key.boundary === key.boundary) {
         cacheHits++;
@@ -185,6 +197,7 @@ export function activeIndexFor(
                 : undefined,
         }),
         key: { ...key },
+        scope,
     };
     return cache.index;
 }

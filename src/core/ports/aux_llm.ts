@@ -35,6 +35,16 @@ export function setAuxLlm(next: AuxLlm | null): void {
     impl = next;
 }
 
+/**
+ * 读取当前实现（可能为 null）。
+ *
+ * 测试里临时替换端口时应先用它保存旧的再还原：直接 `setAuxLlm(null)` 会把组合根
+ * 装好的实现永久清掉，之后任何走 `getAuxLlm()` 的用例都会报「未初始化」。
+ */
+export function getAuxLlmImpl(): AuxLlm | null {
+    return impl;
+}
+
 export function getAuxLlm(): AuxLlm {
     if (!impl) throw new Error('AuxLlm 未初始化：入口需先 installAuxLlm()');
     return impl;

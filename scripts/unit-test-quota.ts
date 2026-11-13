@@ -853,6 +853,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const origInt = { ...TC.intConfigs };
         const origTemplate = { ...TC.templateConfigs };
         try {
+            // 用量是全局存储里的残留：别的用例可能已经给 S1 记过用量，先清干净再断言「放行」
+            QuotaManager.reset();
             // 负限制 → 0=不限；负数/超范围百分比 → 100；非有限值同样回退
             TC.intConfigs['5小时限制'] = -5;
             TC.intConfigs['一周限制'] = Number.NaN;

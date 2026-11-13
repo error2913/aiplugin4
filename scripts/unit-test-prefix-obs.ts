@@ -2,7 +2,7 @@
 // notePrefixRebase 记账 / 十个 reason / 缓存命中率滚动窗口 / 前缀漂移探针 / ArchiveControllerStatus 注入块视图。
 //
 // 为什么单独一个 bundle：这些断言的对照面是「Session 运行时字段 + ArchiveController.status()」，
-// 与 867KB 的 unit-test-entry.ts 无关；独立入口让失败定位更快，也避免污染大入口的装配前提。
+// 与按域拆分的主入口无关；独立入口让失败定位更快，也避免污染大入口的装配前提。
 import assert from 'node:assert/strict';
 
 import { ArchiveController, ArchiveControllerStatus } from '../src/context/archive_controller';

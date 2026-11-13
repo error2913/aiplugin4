@@ -8,7 +8,7 @@ import { SubCmd } from '../src/cmd/root_cmd';
 import { ContextService } from '../src/context/service';
 import { setMissingKeyErrorDetector } from '../src/context/log/page_store';
 import { getHost, setHost } from '../src/core/host';
-import { setAgentResolver } from '../src/core/ports/agent_registry';
+import { getAgentResolver, setAgentResolver } from '../src/core/ports/agent_registry';
 import { SessionService } from '../src/session/session_service';
 import { Session } from '../src/session/session';
 import { sessionStorageKey } from '../src/session/persistence';
@@ -116,6 +116,9 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const session = service.getSession(sid);
         session.sessionType = 'user';
         (session.context as any).isColdSession = () => false;
+        // 保存生产注册的解析器：原来是直接置 null，会把 agent 注册表永久掏空，
+        // 让后续任何走 getAgent() 的用例报「Agent 解析器未注册」（跨文件顺序污染）。
+        const prevResolver = getAgentResolver();
         setAgentResolver(() => ({ sessionService: service }) as any);
         try {
             // user/assistant 交替 ⇒ 每条各自成为单元（连续 user 会被 segmentUnits 合并成一个单元，
@@ -141,7 +144,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             session.context.setV2BudgetCap(null);
             assert.equal(session.context.v2BudgetCapValue, null);
         } finally {
-            setAgentResolver(null);
+            setAgentResolver(prevResolver);
         }
     },
 
@@ -157,6 +160,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const session = service.getSession(sid);
         session.sessionType = 'user';
         (session.context as any).isColdSession = () => false;
+        const prevResolver = getAgentResolver();
         setAgentResolver(() => ({ sessionService: service }) as any);
         try {
             // 只有一条 user 消息 ⇒ 单单元 ⇒ selectCut 永远切不动
@@ -166,7 +170,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(outcome, 'failed', '切不动必须如实返回 failed');
             assert.equal(session.contextV2!.head().archivedThrough, archivedBefore, '水位不得假装前移');
         } finally {
-            setAgentResolver(null);
+            setAgentResolver(prevResolver);
         }
     },
 

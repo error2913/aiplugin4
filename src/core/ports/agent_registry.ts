@@ -13,6 +13,11 @@ export function setAgentResolver(fn: AgentResolver | null): void {
     resolver = fn;
 }
 
+/** 读取当前解析器：测试里临时替换后用它还原，避免把生产注册的解析器永久清掉 */
+export function getAgentResolver(): AgentResolver | null {
+    return resolver;
+}
+
 /** 取 Agent（语义等同改造前的 Agent.get）；解析器未注册时抛明确错误 */
 export function getAgent(name: string): Agent {
     if (!resolver) throw new Error('Agent 解析器未注册：请确保入口加载了 src/agent/agent');

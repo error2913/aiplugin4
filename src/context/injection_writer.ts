@@ -134,7 +134,8 @@ export function readInjectionLedger(
     });
     const key = activeIndexKeyOf(split.injections, split.released, boundary);
     return {
-        index: activeIndexFor(split.injections, split.released, key, redacts),
+        // scope 传 service：同键不同会话不得串用索引（否则并发会话互判 dup ⇒ 静默不注入）
+        index: activeIndexFor(split.injections, split.released, key, redacts, service),
         boundary,
         activeTokens: activeInjectTokens(snapshot.events, snapshot.head),
     };

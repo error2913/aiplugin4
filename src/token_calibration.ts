@@ -85,4 +85,19 @@ export class TokenCalibration {
     static resetForTest(): void {
         this.cache = null;
     }
+
+    /**
+     * 测试专用：连同**持久化**一起清空（内存置空 + 把空 map 写回存储）。
+     *
+     * 为什么需要它：`record()` 内部会 `save()` 落盘，`resetForTest()` 只清内存，
+     * 下一个用例 `getMap()` 又会从存储读回上一个用例写下的样本 —— 表现为"重置过了却带着别人的 factor"。
+     */
+    static resetAllForTest(): void {
+        this.cache = {};
+        try {
+            this.save();
+        } catch (_e) {
+            // 测试宿主未就绪时允许失败：内存已清空，语义仍然成立
+        }
+    }
 }

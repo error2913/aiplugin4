@@ -6,7 +6,7 @@ import Config from '../src/config/config';
 import { archiveControllerFor, resetArchiveController } from '../src/context/compact/session_runtime';
 import { setArchiveFactsSink } from '../src/core/ports/archive_facts';
 import { getHost, setHost } from '../src/core/host';
-import { setAuxLlm } from '../src/core/ports/aux_llm';
+import { getAuxLlmImpl, setAuxLlm } from '../src/core/ports/aux_llm';
 import { SessionService } from '../src/session/session_service';
 import { TokenCalibration } from '../src/token_calibration';
 import { estimateMessageTokens, estimateTextTokens, handleMessages } from '../src/utils/message';
@@ -86,6 +86,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             captured.calls.push({ sessionId: input.sessionId, facts: input.facts, fromSeq: input.fromSeq, toSeq: input.toSeq });
             return [];
         });
+        const __prevAux = getAuxLlmImpl();
         setAuxLlm({
             chat: async () => combinedReply([{ memory_type: 'private', target_id: 'QQ:1', text: '用户喜欢猫', type: 'fact', confidence: 0.9 }]),
             chatMessages: async () => '',
@@ -103,7 +104,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(captured.calls[0].facts.length, 1);
             assert.ok(captured.calls[0].toSeq >= captured.calls[0].fromSeq);
         } finally {
-            setAuxLlm(null);
+            setAuxLlm(__prevAux);
             setArchiveFactsSink(null);
         }
     },
@@ -119,6 +120,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             applied++;
             return [];
         });
+        const __prevAux = getAuxLlmImpl();
         setAuxLlm({
             chat: async () => combinedReply([{ memory_type: 'private', target_id: 'QQ:1', text: '用户喜欢茶', type: 'fact', confidence: 0.9 }]),
             chatMessages: async () => '',
@@ -142,7 +144,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const after = getHost().storage.get(draftKey);
             assert.ok(!after, '成功重放后草稿应清除');
         } finally {
-            setAuxLlm(null);
+            setAuxLlm(__prevAux);
             setArchiveFactsSink(null);
         }
     },
@@ -153,6 +155,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (Config as any).cache = {};
         let calls = 0;
         setArchiveFactsSink(async () => []);
+        const __prevAux = getAuxLlmImpl();
         setAuxLlm({
             chat: async () => { calls++; return '这不是 JSON'; },
             chatMessages: async () => '',
@@ -167,7 +170,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.equal(session.contextV2!.snapshot().records.filter(r => r.kind === 'summary').length, 0, '不提交摘要');
             assert.ok(session.contextV2!.head().archivedThrough > 0, '报错也归档标记块（契约：原文仍可检索）');
         } finally {
-            setAuxLlm(null);
+            setAuxLlm(__prevAux);
             setArchiveFactsSink(null);
         }
     },
@@ -176,6 +179,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         installHost();
         (globalThis as any).__TEST_CONFIG__.intConfigs['结算空闲门槛'] = 0;
         (Config as any).cache = {};
+        const __prevAux = getAuxLlmImpl();
         setAuxLlm({
             chat: async () => combinedReply(),
             chatMessages: async () => combinedReply(),
@@ -190,7 +194,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             assert.ok(summaries.length >= 1, '应写入滚动摘要记录');
             assert.ok(session.contextV2!.head().summarizedThrough >= 1);
         } finally {
-            setAuxLlm(null);
+            setAuxLlm(__prevAux);
         }
     },
 
@@ -290,6 +294,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         (Config as any).cache = {};
         let summarizeCalls = 0;
         let release: (() => void) | null = null;
+        const __prevAux = getAuxLlmImpl();
         setAuxLlm({
             chat: async () => {
                 summarizeCalls++;
@@ -322,7 +327,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
             resetArchiveController(session);
             assert.notEqual(archiveControllerFor(session), controller, 'reset 后应重建控制器');
         } finally {
-            setAuxLlm(null);
+            setAuxLlm(__prevAux);
         }
     },
 };

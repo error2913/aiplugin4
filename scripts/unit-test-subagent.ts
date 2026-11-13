@@ -1,5 +1,5 @@
 // 子代理机制层单元测试（DSH 对齐子代理，行为见 docs/03）。
-// 由 scripts/test-unit.cjs 打包运行；不依赖 seal/Config。
+// 由 scripts/test-unit.cjs 打包运行；不依赖 seal（Config 在下方装配注册）
 import assert from 'node:assert/strict';
 
 import './test-host';
@@ -38,6 +38,10 @@ import {
 import Config from '../src/config/config';
 import { Session } from '../src/session/session';
 import Tool, { toolMap } from '../src/tool/tool';
+
+// 本文件多个用例直接读 Config.tool / Config.subagent：与生产一致，装配期先注册配置。
+// （registerConfig 已做幂等，重复调用安全；不再依赖"别的入口先跑过"这种隐式顺序。）
+Config.registerConfig();
 
 export const tests: Record<string, () => void | Promise<void>> = {};
 
@@ -443,10 +447,8 @@ tests['subagent.providers.factoryAndSemantics'] = async () => {
     assert.equal(prepared, 0, '前台不走 prepareContinuable');
 };
 
-// ---------- Session headless 对接（依赖 Config.registerConfig，runner 已先 require 主入口） ----------
+// ---------- Session headless 对接（依赖 Config，文件顶部已统一注册） ----------
 tests['subagent.session.headlessReplyAndToolScope'] = async () => {
-    (Config as unknown as { cache: unknown }).cache = {};
-    Config.registerConfig();
     const names = ['zz_sub_a', 'zz_sub_b'];
     for (const n of names) {
         new Tool({ type: 'function', function: { name: n, description: 't', parameters: { type: 'object', properties: {} } } });

@@ -44,6 +44,11 @@ const pendingUrlToBase64 = new WeakMap<Image, Promise<void>>();
 // 「缺少 btoa」只提示一次：极老内核下每张图都报会刷屏
 let btoaWarned = false;
 
+/** 测试专用：复位「btoa 缺失只提示一次」的模块级标志（否则跨用例再也看不到提示） */
+export function resetBtoaWarnForTest(): void {
+    btoaWarned = false;
+}
+
 export default class Image {
     static validKeysMap: { [key in keyof Image]?: TypeDescriptor<Image[key]> } = {
         imageId: 'string',

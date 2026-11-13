@@ -1,5 +1,5 @@
 // #163 D4 时间层单测（T13 组）：fmtDateTz / formatGap / wakeMarker / writeWakeMarker / wakeSession marker /
-// renderTimerText / renderActiveHoursText。独立 bundle，避免污染 867KB 的 unit-test-entry.ts。
+// renderTimerText / renderActiveHoursText。独立 bundle，避免污染按域拆分的主入口。
 import assert from 'node:assert/strict';
 
 import { renderActiveHoursText, renderTimerText } from '../src/timer';

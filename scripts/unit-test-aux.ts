@@ -22,6 +22,7 @@ import { createResourceAdapter } from "../src/agent/adapters/resource";
 import { installAuxTools, resetAuxToolsForTest } from "../src/agent/aux_tools_impl";
 import { deriveImagePromptFlags } from "../src/prompt/builder";
 import { registerAllTools } from "../src/tool/bootstrap";
+import { resetMCPCacheForTest } from "../src/tool/mcp/config";
 import { toolMap } from "../src/tool/registry";
 
 const TC = (globalThis as any).__TEST_CONFIG__;
@@ -380,28 +381,44 @@ export const tests: Record<string, () => void | Promise<void>> = {
         ensureConfigRegistered();
         // 与生产装配顺序一致：先注册工具，再安装 aux 适配器（builtin 适配器只暴露已注册工具）
         if (Object.keys(toolMap).length === 0) registerAllTools();
-        setBool("资源清单注入", false);
-        setBool("是否启用MCP", false);
-        setString("后端配置", "");
-        resetAuxToolsForTest();
-        installAuxTools();
-        assert.ok(auxRegistry.list().some(adapter => adapter.id === "builtin"));
-        assert.ok(auxRegistry.list().some(adapter => adapter.id === "mcp-generic"));
-        assert.ok(!auxRegistry.hasSnippet("image-host"), "未配置后端图床/MCP 时不应有图床段");
-        assert.ok(!auxRegistry.hasSnippet("resource"), "资源段默认关");
-        assert.ok(auxRegistry.viewFor("summarizer", "summary-image").tools.some(tool => tool.name === "image_view"));
+        // 本用例会临时改写这些全局配置：结束后**必须**还原，否则默认桩里「是否启用MCP」被留成 false，
+        // 后续 .ai mcp 用例读到的服务器列表为空（表现为"当前平台没有可用的 MCP 服务器"）。
+        const savedBool = {
+            '资源清单注入': TC.boolConfigs['资源清单注入'],
+            '是否启用MCP': TC.boolConfigs['是否启用MCP'],
+        };
+        const savedBackend = TC.stringConfigs['后端配置'];
+        try {
+            setBool("资源清单注入", false);
+            setBool("是否启用MCP", false);
+            setString("后端配置", "");
+            resetAuxToolsForTest();
+            installAuxTools();
+            assert.ok(auxRegistry.list().some(adapter => adapter.id === "builtin"));
+            assert.ok(auxRegistry.list().some(adapter => adapter.id === "mcp-generic"));
+            assert.ok(!auxRegistry.hasSnippet("image-host"), "未配置后端图床/MCP 时不应有图床段");
+            assert.ok(!auxRegistry.hasSnippet("resource"), "资源段默认关");
+            assert.ok(auxRegistry.viewFor("summarizer", "summary-image").tools.some(tool => tool.name === "image_view"));
 
-        // 配置后端图床：图床适配器注册 → hasSnippet('image-host') 为 true（等价旧 ImageHost.enabled）
-        setString("后端配置", JSON.stringify({ version: 1, backends: { "image-host": { url: "http://127.0.0.1:46680", token: "tok" } } }));
-        resetAuxToolsForTest();
-        installAuxTools();
-        assert.ok(auxRegistry.hasSnippet("image-host"));
-        assert.equal(auxRegistry.snippet("image-host").data.backend, true);
-        // 幂等：重复 install 不重复注册（非 force）
-        installAuxTools();
-        assert.equal(auxRegistry.list().filter(adapter => adapter.id === "image-host").length, 1);
-        resetAuxToolsForTest();
-        setString("后端配置", "");
+            // 配置后端图床：图床适配器注册 → hasSnippet('image-host') 为 true（等价旧 ImageHost.enabled）
+            setString("后端配置", JSON.stringify({ version: 1, backends: { "image-host": { url: "http://127.0.0.1:46680", token: "tok" } } }));
+            resetAuxToolsForTest();
+            installAuxTools();
+            assert.ok(auxRegistry.hasSnippet("image-host"));
+            assert.equal(auxRegistry.snippet("image-host").data.backend, true);
+            // 幂等：重复 install 不重复注册（非 force）
+            installAuxTools();
+            assert.equal(auxRegistry.list().filter(adapter => adapter.id === "image-host").length, 1);
+        } finally {
+            resetAuxToolsForTest();
+            for (const [k, v] of Object.entries(savedBool)) {
+                if (v === undefined) delete TC.boolConfigs[k]; else TC.boolConfigs[k] = v;
+            }
+            if (savedBackend === undefined) delete TC.stringConfigs['后端配置']; else TC.stringConfigs['后端配置'] = savedBackend;
+            // MCP 配置是模块级缓存：还原配置后必须失效，否则缓存里仍是"未启用"
+            resetMCPCacheForTest();
+            resetConfigCache();
+        }
     },
 
     /** 配置：摘要工具集模板默认非空 + 未知值被忽略（WARN 由配置层打印） */

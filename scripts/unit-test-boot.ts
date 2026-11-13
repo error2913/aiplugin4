@@ -1,4 +1,4 @@
-// 启动装配回归测试入口（独立 bundle，不与 unit-test-entry 共享模块实例）。
+// 启动装配回归测试入口（独立 bundle，不与 unit-test-*.ts 主入口共享模块实例）。
 // 目的：模拟 src/index.ts 的 main() 首段真实顺序（test-host 注入宿主/钩子 → Config.registerConfig()），
 // 断言「配置注册完成后模型配置应用钩子必须已执行、Model 注册表非空」。
 // 背景：Phase 2b 把配置解析与应用拆开后，预热路径若绕过 getCache 就会导致 Model 为空（首条消息失败），

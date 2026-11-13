@@ -1,7 +1,7 @@
 // #163 D3 内置注入 provider 单测：`core:memory`（预算三值 / 零成本稳态 / 按 k 拒发）与
 // `core:mcp`（元数据 / 每 server 一条 / 按 k 拒发），以及两者的注册接线。
 //
-// 独立 bundle（不塞进 867KB 的 unit-test-entry.ts），风格与 scripts/unit-test-time-inject.ts 一致。
+// 独立 bundle（不塞进按域拆分的主入口），风格与 scripts/unit-test-time-inject.ts 一致。
 import assert from 'node:assert/strict';
 
 import type { InjectionItem } from '../src/context/injections';
