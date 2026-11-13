@@ -110,6 +110,13 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 - 单测/模拟：`npm run test:unit`、`npm run sim`、`npm run sim:matrix`、`npm run fuzz`、`npm run test:ob11`（共享 seal 桩在 `scripts/harness/seal-env.cjs`，新增 seal API 只改这一处）。
 - 单测 runner（`scripts/test-unit.cjs`）：**一次 esbuild 多入口构建 → 一次性加载 → 显式 `process.exit`**（交错 build/require 会把 require 拖慢近 10 倍；不显式退出会被 src 残留定时器拖 20+ 秒）。每入口独立 bundle ⇒ 各自持有独立模块实例。新增 `unit-test-*.ts` 只需在 `entries` 数组登记，顺序即执行顺序。
 - 单测隔离性巡检：`UNIT_ORDER=reverse | shuffle:<seed> | files-reverse | files-shuffle:<seed> | inner-reverse` 乱序跑；`UNIT_FILES` / `UNIT_TESTS` 按给定顺序只跑指定入口/用例（二分定位污染源）；`UNIT_ORDER_LOG` 落盘实际执行顺序以复现现场；`UNIT_REPORT_ALL=1` 一次拿全失败。**默认顺序全绿不等于隔离干净**：改共享状态（单例/端口/配置/模块级 flag）后至少补跑 `reverse` 与一个 `shuffle`。
+- 单测分域/增量（内循环提速，CI 仍固定跑全量）：
+  - `npm run test:unit:list` —— 打印「域 / 入口 / 用例数」表（15 个域见 `scripts/test-unit.cjs` 的 `DOMAINS`，**新增入口必须归域，否则 runner 启动即报错**）。
+  - `npm run test:unit:only` —— 等价 `--changed --only`：按 `git diff HEAD` 的影响面只跑相关入口（实测 0.4–10s）。
+  - `npm run test:unit:changed` —— 先跑相关入口、再跑剩余（失败早报），总耗时与全量基本持平。
+  - `node scripts/test-unit.cjs --domain=media --only` —— 只跑指定域；去掉 `--only` 即「该域优先 + 其余随后」。
+  - 影响面来自 esbuild metafile（每个产物内联了哪些 `src/` 文件），缓存在 `node_modules/.cache/aiplugin4-unit/manifest.json`；`scripts/test-unit.cjs` 或 `scripts/harness/` 变更一律视为全量。
+  - `src/core/host.ts`、`src/utils/token_estimate.ts` 等被 40+ 入口内联，改它们时 `--only` 约等于全量——这是真实的依赖面，不是漏判。
 - #163 相关新增入口：`scripts/unit-test-prefix-obs.ts`（rebase 记账/白名单原因/缓存窗口滚动/漂移探针/注入块状态视图/`config:<key>` 指纹基线语义）、`scripts/unit-test-injection-contract.ts`（注入块渲染位置/去重判定/索引 memo/释放 token 扣减/写块四步顺序的纯函数契约）、`scripts/unit-test-injection-plan.ts`（每轮接线层：四种早退、写块、稳态零注入、provider 异常分流）、`scripts/unit-test-injection-providers.ts`（注入预算三值与 provider 行为）、`scripts/unit-test-archive-tools.ts`（工具面恒定 `JSON.stringify` 逐字节相等 / 归档注入口径 `T`/`selectCut`/`selectMarkForTarget`/`selectMarkTo` / `L` 单一实现）、`scripts/unit-test-time-inject.ts`（时间注入格式与偏移换算）、`scripts/unit-test-quote.ts`（引用 ID 解析口径）。
 - 海豹面板 / QQ 环境测试：使用 Codex 技能 `aiplugin4-test-suite`（全量/单项/重载/配置调试用例，技能本体在 `skills/aiplugin4-test-suite/`），面板自动化与 qqmcp 复用 `sealdice-plugin-dev` 技能。
 - 面板 API 登录注意：新版海豹 signin 不是明文密码——先 `GET /sd-api/signin/salt` 拿盐，密码经 PBKDF2-SHA512(password, salt, 1000, 32) 哈希后拼成 `base64("v01"+salt+迭代数+derived)` 提交（本机工具脚本见 `.dev/panel-api.ps1`、`.dev/sign-hash.mjs`，`.dev/` 已 gitignore）。

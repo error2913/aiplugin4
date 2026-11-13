@@ -357,7 +357,8 @@ async function buildEntries(namesToBuild) {
     let builtNames = null;
     let metafile = null;
 
-    const wantImpact = Boolean(opts.changed || opts.domains);
+    // 只有 --changed 需要依赖图；--domain 直接查 DOMAINS 表，不必为它白算一次全量构建
+    const wantImpact = Boolean(opts.changed);
     if (wantImpact) manifest = loadManifest();
 
     if (wantImpact && !manifest) {
@@ -511,8 +512,11 @@ async function buildEntries(namesToBuild) {
     if (prioritySet.size > 0 && !opts.only) {
         if (order) console.error('[unit] 提示：优先级模式已生效，UNIT_ORDER 的乱序仅作用于各个阶段内部');
         const first = names.filter(n => prioritySet.has(fileOf[n]));
-        const rest = names.filter(n => !prioritySet.has(n));
+        const rest = names.filter(n => !prioritySet.has(fileOf[n]));
         names = [...first, ...rest];
+        if (first.length + rest.length !== new Set(names).size) {
+            throw new Error(`优先级重排后用例数不自洽：${first.length} + ${rest.length} != ${new Set(names).size}`);
+        }
         const firstCases = first.length;
         console.log(`[unit] ${priorityWhy}`);
         console.log(`[unit] 先跑相关：${[...new Set(first.map(n => fileOf[n]))].length} 个入口 / ${firstCases} 个用例；随后跑剩余 ${rest.length} 个用例`);
