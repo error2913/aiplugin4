@@ -18,7 +18,10 @@ npm run lint:prefix:strict  # 前缀纯度扫描（严格：CI 用，陈旧白�
 npm run lint:prefix:selftest # 自测前缀纯度守卫本身（规则必红 / 上下文锚收窄 / 陈旧白名单可检出）
 npx tsc --noEmit            # 类型检查（直跑 tsconfig，不要加 --strict 覆盖）
 npm run smoke               # 冒烟：Node 中用 seal 桩加载产物
-npm run test:unit           # 单元测试（esbuild 打包 scripts/unit-test-*.ts）
+npm run test:unit           # 单元测试全量（63 入口 / 1085 例，~13s；CI 口径）
+npm run test:unit:list      # 列「域 / 入口 / 用例数」表
+npm run test:unit:only      # 只跑 git 变更影响到的入口（内循环，CI 仍跑全量）
+npm run test:unit:changed   # 先跑变更相关入口、再跑剩余（失败早报）
 npm run test:ob11           # OB11 runtime 模拟
 npm run sim                 # 上下文成本治理端到端模拟（14 项）
 npm run sim:matrix          # 消息顺序/时序矩阵（76 项）
@@ -38,7 +41,7 @@ npm run docs:manifest       # 文档清单（docs-site/manifest.js ↔ docs/ccdo
 npm run docs:build          # 构建文档站点（需 mkdocs）
 ```
 
-改完核心逻辑建议执行 `npm run build && npm run smoke`；提交前至少跑 `npx tsc --noEmit`、`npm run lint`、`npm run test:unit`、`npm run deps:check`、`npm run lint:prefix`。
+改完核心逻辑建议执行 `npm run build && npm run smoke`；提交前至少跑 `npx tsc --noEmit`、`npm run lint`、`npm run test:unit`（全量，勿用 `test:unit:only` 代替验收）、`npm run deps:check`、`npm run lint:prefix`。
 
 ## 代码导航
 
