@@ -212,7 +212,13 @@ function statOf(relFile) {
     return [Math.round(st.mtimeMs), st.size];
 }
 
-/** 读缓存；任何文件 mtime/size 变化或入口清单变化都视为过期（宁可多构建，不可漏跑用例） */
+/**
+ * 读缓存。**只校验结构是否可用，不用 mtime 判过期**：
+ * 「哪些文件变了」由 `git diff` 权威决定，mtime 判定会在每次编辑后都把缓存打成过期、
+ * 退回全量构建，增量就失去意义。这里只挡住「入口清单变了」和「映射里的文件已不存在」两种情况。
+ *
+ * `stamps` 仅作诊断留档（--list 之类可以看），不参与失效判定。
+ */
 function loadManifest() {
     let raw;
     try {
@@ -221,16 +227,18 @@ function loadManifest() {
         return null;
     }
     if (!raw || raw.version !== MANIFEST_VERSION || !raw.entries || !raw.stamps) return null;
-    const names = entries.map(([n]) => n);
-    if (names.some(n => !raw.entries[n])) return null;
-    for (const [file, [mtime, size]] of Object.entries(raw.stamps)) {
-        let st;
-        try {
-            st = fs.statSync(path.join(repo, file));
-        } catch {
-            return null;
+    // 入口清单变化（新增/删除/改名 unit-test-*.ts）⇒ 映射不可信
+    for (const [name] of entries) {
+        if (!raw.entries[name]) return null;
+    }
+    for (const name of Object.keys(raw.entries)) {
+        if (!entries.some(([n]) => n === name)) return null;
+    }
+    // 映射里引用的文件已被删除 ⇒ 图已变
+    for (const info of Object.values(raw.entries)) {
+        for (const f of info.inputs) {
+            if (!fs.existsSync(path.join(repo, f))) return null;
         }
-        if (Math.round(st.mtimeMs) !== mtime || st.size !== size) return null;
     }
     return raw;
 }
