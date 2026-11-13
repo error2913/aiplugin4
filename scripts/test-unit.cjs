@@ -4,13 +4,22 @@
  * 设计要点（性能）：
  * 1. **构建与加载分离**：63 个入口先一次性全部 build 完，再逐个 require。
  *    交错执行（build 一个就 require 一个）会让 require 慢近 10 倍
- *    （实测 load 37.7s → 2.8s，全量单测 75s → 16s）。
+ *    （实测 load 37.7s → 1.5s，全量单测 75s → 15s）。
  * 2. **单次多入口构建**：一个 esbuild.build() 处理全部入口，避免 63 次服务往返。
  * 3. `packages: 'external'` 只让 node_modules 依赖走运行时 require，src 仍逐入口内联，
  *    因此每个入口依旧持有独立的模块实例（Config/Model/toolMap 等单例互不共享），
  *    用例语义与拆分前完全一致。产物必须落在仓库内（放 os.tmpdir() 会 MODULE_NOT_FOUND）。
  * 4. 结束时显式 `process.exit(0)`：src 里的长连接回收/待机唤醒会留下几十个 Timeout，
- *    不主动退出会白等 20+ 秒（实测 41.8s → 16s）。
+ *    不主动退出会白等 20+ 秒（实测 41.8s → 15s）。
+ *
+ * 增量/分域（内循环提速，见 `--help`）：
+ * - `--changed[=<ref>]`：按 git 变更算「受影响入口」，**先跑它们，再跑剩余**（失败早报）。
+ * - `--changed --only`：只跑受影响入口（通常 3–8 个入口、1–3s）。CI 仍跑全量。
+ * - `--domain=a,b`：只跑指定域（域划分见下方 DOMAINS 表）。
+ * - `--list`：打印「域 / 入口 / 用例数」表。
+ * 影响面来自 esbuild metafile（每个产物实际内联了哪些 src 文件），缓存在
+ * `node_modules/.cache/aiplugin4-unit/manifest.json`；缓存按「文件 mtime+size」精确校验，
+ * 任何不一致都退回全量构建，不会用过期映射跳过用例。
  *
  * 可选环境变量：
  * - UNIT_FILTER=<子串> 只跑名字含该子串的用例，便于迭代。
@@ -27,11 +36,14 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const cp = require('node:child_process');
 const esbuild = require('esbuild');
 
 const repo = path.resolve(__dirname, '..');
 // 产物落在 node_modules/.cache（已被 git 忽略），保证运行时能解析到仓库的 node_modules
-const outDir = path.join(repo, 'node_modules', '.cache', 'aiplugin4-unit');
+const cacheRoot = path.join(repo, 'node_modules', '.cache', 'aiplugin4-unit');
+const outDir = path.join(cacheRoot, 'out');
+const manifestPath = path.join(cacheRoot, 'manifest.json');
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -104,18 +116,209 @@ const entries = [
     ['archiveTools', 'unit-test-archive-tools.ts'],
 ];
 
-const { installSealEnv } = require('./harness/seal-env.cjs');
-// 单测环境：空配置 + 出厂模板框采集（seal 桩与 __TEST_CONFIG__ 见 scripts/harness/seal-env.cjs）
-const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-media-' });
-void TC;
+// ---------------------------------------------------------------------------
+// 域划分（人工维护）：新增入口必须归到某个域，否则启动即报错
+// ---------------------------------------------------------------------------
+const DOMAINS = {
+    context: [
+        'contextV2', 'contextMigrate', 'contextView', 'contextLog', 'contextStore',
+        'contextContent', 'contextCompile', 'contextMigratePersist', 'contextProjection',
+        'contextRecall', 'contextService', 'contextAdmin', 'contextCommands', 'contextToolApi',
+        'contextResolve', 'contextMutations', 'contextV2Tools', 'contextSession', 'contextBridge',
+        'contextArchiveController', 'eventQueue', 'tokenSelect', 'timeInject', 'prefixObs',
+        'quote', 'injectionProviders', 'injectionContract', 'injectionPlan', 'archiveTools',
+    ],
+    memory: ['memoryUnit', 'memoryV3'],
+    quota: ['quotaToken', 'quota', 'quotaRequest'],
+    prompt: ['promptText', 'prompt'],
+    model: ['modelSession', 'v5'],
+    config: ['configTools', 'backendConfig'],
+    media: ['imageUnit', 'mediaUnit', 'imageHost', 'imageFetch', 'imageSource'],
+    judge: ['judgeTimer', 'judgeDecision', 'judgeConfig'],
+    trigger: ['eventTrigger', 'triggerM0', 'triggerRule', 'triggerStore', 'triggerChain', 'triggerTools'],
+    tool: ['mcp'],
+    agent: ['aux'],
+    session: ['claimTable', 'chatOutcome'],
+    subagent: ['subagent', 'subagentContext'],
+    core: ['boot', 'protocol'],
+    web: ['web'],
+};
 
-(async () => {
-    // 阶段 1：一次构建全部入口（必须在任何 require 之前完成，见文件头说明 1）
-    const outfiles = new Map();
-    for (const [name] of entries) outfiles.set(name, path.join(outDir, `${name}.cjs`));
-    await esbuild.build({
-        // 用对象形式显式指定产物名，避免依赖入口文件名
-        entryPoints: Object.fromEntries(entries.map(([name, file]) => [name, path.join(__dirname, file)])),
+const domainOfEntry = new Map();
+for (const [domain, names] of Object.entries(DOMAINS)) {
+    for (const name of names) {
+        if (domainOfEntry.has(name)) {
+            throw new Error(`入口 ${name} 被重复归域：${domainOfEntry.get(name)} / ${domain}`);
+        }
+        domainOfEntry.set(name, domain);
+    }
+}
+{
+    const entryNames = entries.map(([n]) => n);
+    const unclassified = entryNames.filter(n => !domainOfEntry.has(n));
+    if (unclassified.length) throw new Error(`以下入口未归域（请加到 DOMAINS）：${unclassified.join(', ')}`);
+    const ghost = [...domainOfEntry.keys()].filter(n => !entryNames.includes(n));
+    if (ghost.length) throw new Error(`DOMAINS 里有已不存在的入口（请删掉）：${ghost.join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+// 命令行参数
+// ---------------------------------------------------------------------------
+const USAGE = `用法：node scripts/test-unit.cjs [选项]
+
+  （无选项）              全量跑（CI 口径）
+  --changed[=<ref>]       按 git 变更算受影响入口，先跑它们再跑剩余（默认 ref=HEAD）
+  --only                  与 --changed / --domain 搭配：只跑选中的入口
+  --domain=<a,b>          只优先跑（或配 --only 只跑）这些域
+  --list                  打印「域 / 入口 / 用例数」表后退出
+  -h, --help              显示本帮助
+
+域：${Object.keys(DOMAINS).join(', ')}
+
+示例：
+  node scripts/test-unit.cjs --list                     # 看域划分
+  node scripts/test-unit.cjs --changed                  # 改了 src 后：先跑相关，再跑剩余
+  node scripts/test-unit.cjs --changed --only           # 内循环：只跑相关（~1–3s）
+  node scripts/test-unit.cjs --domain=media --only      # 只跑媒体域
+  node scripts/test-unit.cjs --domain=context           # 先跑上下文域，再跑剩余
+`;
+
+function parseArgs(argv) {
+    const opts = { changed: null, domains: null, only: false, list: false, help: false };
+    for (const arg of argv) {
+        if (arg === '--only') opts.only = true;
+        else if (arg === '--list') opts.list = true;
+        else if (arg === '-h' || arg === '--help') opts.help = true;
+        else if (arg === '--changed') opts.changed = 'HEAD';
+        else if (arg.startsWith('--changed=')) opts.changed = arg.slice('--changed='.length).trim() || 'HEAD';
+        else if (arg.startsWith('--domain=')) {
+            opts.domains = arg.slice('--domain='.length).split(',').map(s => s.trim()).filter(Boolean);
+            for (const d of opts.domains) {
+                if (!DOMAINS[d]) throw new Error(`未知域 "${d}"；可选：${Object.keys(DOMAINS).join(', ')}`);
+            }
+        } else throw new Error(`未知参数 "${arg}"（用 --help 查看用法）`);
+    }
+    if (opts.only && !opts.changed && !opts.domains) throw new Error('--only 需要与 --changed 或 --domain= 搭配');
+    return opts;
+}
+
+// ---------------------------------------------------------------------------
+// 影响面映射：入口 → 实际内联的 src/scripts 文件（来自 esbuild metafile，带 mtime 校验缓存）
+// ---------------------------------------------------------------------------
+const MANIFEST_VERSION = 1;
+
+function statOf(relFile) {
+    const st = fs.statSync(path.join(repo, relFile));
+    return [Math.round(st.mtimeMs), st.size];
+}
+
+/** 读缓存；任何文件 mtime/size 变化或入口清单变化都视为过期（宁可多构建，不可漏跑用例） */
+function loadManifest() {
+    let raw;
+    try {
+        raw = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch {
+        return null;
+    }
+    if (!raw || raw.version !== MANIFEST_VERSION || !raw.entries || !raw.stamps) return null;
+    const names = entries.map(([n]) => n);
+    if (names.some(n => !raw.entries[n])) return null;
+    for (const [file, [mtime, size]] of Object.entries(raw.stamps)) {
+        let st;
+        try {
+            st = fs.statSync(path.join(repo, file));
+        } catch {
+            return null;
+        }
+        if (Math.round(st.mtimeMs) !== mtime || st.size !== size) return null;
+    }
+    return raw;
+}
+
+function saveManifest(manifest) {
+    try {
+        fs.mkdirSync(cacheRoot, { recursive: true });
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    } catch (error) {
+        console.error('[unit] 依赖图缓存写入失败（不影响本次结果）：' + String(error && error.message));
+    }
+}
+
+/** 从 metafile 抽「产物名 → 内联文件清单」，并为每个文件记 mtime+size 供下次校验 */
+function manifestFromMetafile(metafile, builtNames) {
+    const manifest = { version: MANIFEST_VERSION, entries: {}, stamps: {} };
+    const files = new Set();
+    const outputs = metafile && metafile.outputs ? metafile.outputs : {};
+    for (const [name] of entries) {
+        if (!builtNames.has(name)) continue;
+        const key = Object.keys(outputs).find(p => path.basename(p) === `${name}.cjs`);
+        if (!key) continue;
+        const inputs = Object.keys(outputs[key].inputs || {})
+            .map(p => p.replace(/\\/g, '/'))
+            .sort();
+        manifest.entries[name] = { inputs };
+        for (const f of inputs) files.add(f);
+    }
+    for (const f of files) {
+        try {
+            manifest.stamps[f] = statOf(f);
+        } catch {
+            // 文件已不在（构建期临时产物等）：不记 stamp，下次自然判过期
+        }
+    }
+    return manifest;
+}
+
+function gitChangedFiles(ref) {
+    const git = args => cp.execFileSync('git', ['-C', repo, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const changed = new Set();
+    for (const line of git(['diff', '--name-only', ref, '--']).split(/\r?\n/)) {
+        if (line.trim()) changed.add(line.replace(/\\/g, '/').trim());
+    }
+    // 未跟踪的新文件（新建 src 模块时也要算进来）
+    for (const line of git(['ls-files', '--others', '--exclude-standard']).split(/\r?\n/)) {
+        if (line.trim()) changed.add(line.replace(/\\/g, '/').trim());
+    }
+    return [...changed];
+}
+
+/** 变更文件 → 受影响入口。runner/harness 变更一律全量。 */
+function affectedEntries(changedFiles, manifest) {
+    const allNames = entries.map(([n]) => n);
+    if (changedFiles.some(f => f === 'scripts/test-unit.cjs' || f.startsWith('scripts/harness/'))) {
+        return { names: allNames, why: 'scripts/test-unit.cjs 或 scripts/harness/ 变更 ⇒ 全量', universal: true, files: [] };
+    }
+    const fileToEntries = new Map();
+    for (const [name, info] of Object.entries(manifest.entries)) {
+        for (const f of info.inputs) {
+            if (!fileToEntries.has(f)) fileToEntries.set(f, []);
+            fileToEntries.get(f).push(name);
+        }
+    }
+    const hit = new Set();
+    const hitFiles = [];
+    for (const f of changedFiles) {
+        const owners = fileToEntries.get(f);
+        if (!owners || owners.length === 0) continue;
+        hitFiles.push(f);
+        for (const n of owners) hit.add(n);
+    }
+    return { names: allNames.filter(n => hit.has(n)), why: `git diff 命中 ${hitFiles.length} 个被内联的文件`, universal: false, files: hitFiles };
+}
+
+// ---------------------------------------------------------------------------
+// 构建 / 运行
+// ---------------------------------------------------------------------------
+async function buildEntries(namesToBuild) {
+    const set = new Set(namesToBuild);
+    const picked = entries.filter(([n]) => set.has(n));
+    const result = await esbuild.build({
+        absWorkingDir: repo,
+        // 对象形式显式指定产物名，避免依赖入口文件名
+        entryPoints: Object.fromEntries(picked.map(([name, file]) => [name, `scripts/${file}`])),
         bundle: true,
         platform: 'node',
         format: 'cjs',
@@ -123,20 +326,117 @@ void TC;
         outExtension: { '.js': '.cjs' },
         packages: 'external',
         logLevel: 'silent',
+        metafile: true,
     });
+    return result.metafile;
+}
+
+(async () => {
+    const opts = parseArgs(process.argv.slice(2));
+    if (opts.help) {
+        console.log(USAGE);
+        process.exit(0);
+    }
+    const allNames = entries.map(([n]) => n);
+
+    const { installSealEnv } = require('./harness/seal-env.cjs');
+    // 单测环境：空配置 + 出厂模板框采集（seal 桩与 __TEST_CONFIG__ 见 scripts/harness/seal-env.cjs）
+    const TC = installSealEnv({ preset: 'unit', base64Prefix: '/tmp/aiplugin4-test-media-' });
+    void TC;
+
+    // ---- 1. 决定要构建/运行哪些入口 ----
+    let manifest = null;
+    let builtNames = null;
+    let metafile = null;
+
+    const wantImpact = Boolean(opts.changed || opts.domains);
+    if (wantImpact) manifest = loadManifest();
+
+    if (wantImpact && !manifest) {
+        // 冷启动：先全量构建一次拿依赖图（同时就是本次要跑的全量产物）
+        console.error('[unit] 依赖图缓存缺失或已过期，先全量构建一次以生成影响面映射…');
+        metafile = await buildEntries(allNames);
+        builtNames = new Set(allNames);
+        manifest = manifestFromMetafile(metafile, builtNames);
+        saveManifest(manifest);
+    }
+
+    // 优先级入口（先跑这些）；--only 时它们就是全部
+    let priorityNames = [];
+    let priorityWhy = '';
+    if (opts.changed) {
+        const changedFiles = gitChangedFiles(opts.changed);
+        const affected = affectedEntries(changedFiles, manifest);
+        priorityNames = affected.names;
+        priorityWhy = `对比 ${opts.changed}：${affected.why}`;
+    }
+    if (opts.domains) {
+        const domainPicked = entries.map(([n]) => n).filter(n => opts.domains.includes(domainOfEntry.get(n)));
+        // 两个来源同时给时取并集（保持全局顺序）
+        const merged = new Set([...priorityNames, ...domainPicked]);
+        priorityNames = allNames.filter(n => merged.has(n));
+        priorityWhy += (priorityWhy ? '；' : '') + `域 ${opts.domains.join(',')}（${domainPicked.length} 个入口）`;
+    }
+    const prioritySet = new Set(priorityNames);
+
+    let runNames;
+    if (opts.only) {
+        runNames = allNames.filter(n => prioritySet.has(n));
+        if (runNames.length === 0) {
+            console.log(`[unit] ${priorityWhy}`);
+            console.log('[unit] 没有受影响/被选中的用例 —— 本次不跑任何用例（CI 仍会跑全量）');
+            fs.rmSync(outDir, { recursive: true, force: true });
+            process.exit(0);
+        }
+    } else {
+        runNames = allNames;
+    }
+
+    if (!builtNames) {
+        const toBuild = opts.only ? runNames : allNames;
+        metafile = await buildEntries(toBuild);
+        builtNames = new Set(toBuild);
+        if (!opts.only) {
+            // 全量构建顺带刷新影响面缓存，下次 --changed 就无需再全量构建
+            saveManifest(manifestFromMetafile(metafile, builtNames));
+        }
+    }
     await esbuild.stop();
 
-    // 阶段 2：逐个加载
+    // ---- 2. 逐个加载（只加载构建过的入口） ----
     const all = {};
     const fileOf = {}; // 用例名 → 所属入口文件（用于按文件隔离巡检）
     for (const [name] of entries) {
-        const mod = require(outfiles.get(name));
+        if (!builtNames.has(name)) continue;
+        const mod = require(path.join(outDir, `${name}.cjs`));
         for (const key of Object.keys(mod.tests)) {
             if (all[key] !== undefined) throw new Error(`重复的单元测试名: ${key}`);
             all[key] = mod.tests[key];
             fileOf[key] = name;
         }
     }
+    const caseCountOfEntry = {};
+    for (const [name] of entries) {
+        const mod = builtNames.has(name) ? require(path.join(outDir, `${name}.cjs`)) : null;
+        caseCountOfEntry[name] = mod ? Object.keys(mod.tests).length : 0;
+    }
+
+    // ---- 3. 列表模式 ----
+    if (opts.list) {
+        console.log('域\t\t入口\t用例');
+        let totalEntries = 0;
+        let totalCases = 0;
+        for (const [domain, names] of Object.entries(DOMAINS)) {
+            const cases = names.reduce((sum, n) => sum + (caseCountOfEntry[n] || 0), 0);
+            totalEntries += names.length;
+            totalCases += cases;
+            console.log(`${domain.padEnd(10)}\t${String(names.length).padStart(2)}\t${String(cases).padStart(4)}`);
+        }
+        console.log(`合计\t\t${totalEntries}\t${totalCases}`);
+        fs.rmSync(outDir, { recursive: true, force: true });
+        process.exit(0);
+    }
+
     // UNIT_FILES=<逗号分隔的入口名>：只跑这些入口文件里的用例，且按给定顺序执行（隔离巡检/二分定位用）
     const onlyFilesList = process.env.UNIT_FILES ? process.env.UNIT_FILES.split(',').map(s => s.trim()).filter(Boolean) : null;
     const onlyFiles = onlyFilesList ? new Set(onlyFilesList) : null;
@@ -198,6 +498,21 @@ void TC;
         if (order === 'inner-reverse') for (const f of fileOrder) groups.get(f).reverse();
         names = fileOrder.flatMap(f => groups.get(f));
     }
+
+    // ---- 4. 分域/影响面模式：相关入口的用例排到最前（失败早报），其余随后 ----
+    if (prioritySet.size > 0 && !opts.only) {
+        if (order) console.error('[unit] 提示：优先级模式已生效，UNIT_ORDER 的乱序仅作用于各个阶段内部');
+        const first = names.filter(n => prioritySet.has(fileOf[n]));
+        const rest = names.filter(n => !prioritySet.has(n));
+        names = [...first, ...rest];
+        const firstCases = first.length;
+        console.log(`[unit] ${priorityWhy}`);
+        console.log(`[unit] 先跑相关：${[...new Set(first.map(n => fileOf[n]))].length} 个入口 / ${firstCases} 个用例；随后跑剩余 ${rest.length} 个用例`);
+    } else if (opts.only) {
+        console.log(`[unit] 只跑选中范围：${runNames.length} 个入口 / ${names.length} 个用例（CI 仍跑全量，这里不做最终验收）`);
+        console.log(`[unit] ${priorityWhy}`);
+    }
+
     // UNIT_REPORT_ALL=1：单个用例失败不中断，跑完全部后汇总（乱序巡检时用来一次拿到所有顺序依赖）
     const reportAll = process.env.UNIT_REPORT_ALL === '1';
     const failed = [];
