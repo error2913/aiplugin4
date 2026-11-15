@@ -549,5 +549,95 @@ export const tests: Record<string, () => void | Promise<void>> = {
             (globalThis as any).seal.replyToSender = origReply;
             if (origStatus) SubCmd.map['status'] = origStatus; else delete SubCmd.map['status'];
         }
+    },
+
+    /** .ai status：缓存率展示（有数据显示百分比 / 无数据显示短横，不谎报 0%） */
+    testCmdStatusShowsCacheRate(): void {
+        const origReply = (globalThis as any).seal.replyToSender;
+        const origStatus = SubCmd.map['status'];
+        let replied = '';
+        (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
+        try {
+            registerCmdStatus();
+            const session = new Session();
+            session.sessionId = 'QQ:20000';
+            session.sessionType = 'user';
+            const run = () => SubCmd.map['status'].solve({
+                ctx: { endPoint: { userId: 'QQ:20000' }, player: { userId: 'QQ:20000', name: '测试员' } } as any,
+                msg: {} as any, cmdArgs: {} as any,
+                epId: 'QQ:20000', uid: 'QQ:20000', gid: '', sid: 'QQ:20000',
+                session, page: 1, ret: {} as any,
+            });
+
+            run();
+            assert.ok(replied.includes('缓存率: -（本会话暂无数据）'), `无数据应显示短横，实际: ${replied}`);
+            assert.ok(/^ {8}缓存率: /m.test(replied), `新行必须 8 空格缩进（窄屏排版契约），实际: ${replied}`);
+            assert.ok(replied.indexOf('上下文轮数:') < replied.indexOf('缓存率:'), '缓存率必须在上下文轮数之后');
+            assert.ok(replied.indexOf('缓存率:') < replied.indexOf('AI 总闸'), '缓存率必须在 AI 总闸之前');
+            assert.equal((replied.match(/缓存率: /g) ?? []).length, 1, '恰好新增一行，不得重复');
+
+            session.noteCacheUsage({ prompt_tokens: 1000, cache_read_tokens: 735 });
+            run();
+            assert.ok(replied.includes('缓存率: 73.5%（近 1 轮）'), `应显示命中率，实际: ${replied}`);
+
+            // 多轮滚动：百分比按窗口累加值算，轮数跟随窗口
+            session.noteCacheUsage({ prompt_tokens: 1000, cache_read_tokens: 265 });
+            run();
+            assert.ok(replied.includes('缓存率: 50.0%（近 2 轮）'), `多轮应累计，实际: ${replied}`);
+        } finally {
+            (globalThis as any).seal.replyToSender = origReply;
+            if (origStatus) SubCmd.map['status'] = origStatus; else delete SubCmd.map['status'];
+        }
+    },
+
+    /** .ai status：缓存率纯只读（不改窗口、不落盘）+ 观测缺失时降级不炸 */
+    testCmdStatusCacheRateIsReadOnly(): void {
+        const origReply = (globalThis as any).seal.replyToSender;
+        const origStatus = SubCmd.map['status'];
+        const origSet = (ext as any).storageSet;
+        let replied = '';
+        let writes = 0;
+        (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
+        try {
+            registerCmdStatus();
+            const session = new Session();
+            session.sessionId = 'QQ:20001';
+            session.sessionType = 'user';
+            const run = () => SubCmd.map['status'].solve({
+                ctx: { endPoint: { userId: 'QQ:20001' }, player: { userId: 'QQ:20001', name: '测试员' } } as any,
+                msg: {} as any, cmdArgs: {} as any,
+                epId: 'QQ:20001', uid: 'QQ:20001', gid: '', sid: 'QQ:20001',
+                session, page: 1, ret: {} as any,
+            });
+
+            // 首轮预热：让 trigger/store 的首次 lazy load 完成（seal 桩 storageGet 返回 ''
+            // ⇒ 规则库为空 ⇒ 本就不写；预热是防御性写法，避免把既有首次加载写算到缓存行头上）
+            run();
+            (ext as any).storageSet = (...args: any[]) => { writes += 1; return (origSet as any)?.apply(ext, args); };
+            session.noteCacheUsage({ prompt_tokens: 500, cache_read_tokens: 250 });
+            const before = JSON.stringify(session.cacheWindow);
+
+            run();
+            assert.equal(JSON.stringify(session.cacheWindow), before, 'status 不得改动缓存窗口（不得触发滚动/淘汰）');
+            assert.equal(writes, 0, `缓存行只读：不得写存储，实际写 ${writes} 次`);
+            assert.ok(replied.includes('缓存率: 50.0%（近 1 轮）'), replied);
+
+            // 观测字段缺失/畸形：只降级这一行，其余行照常
+            (session as any).cacheWindow = undefined;
+            run();
+            assert.ok(replied.includes('缓存率: -（本会话暂无数据）'), `缺失应降级，实际: ${replied}`);
+            assert.ok(replied.includes('平台: '), '降级不得影响其它行');
+            assert.ok(replied.includes('上下文轮数:'), '降级不得影响其它行');
+            assert.ok(replied.includes('AI 总闸'), '降级不得影响其它行');
+
+            // 畸形结构（脏数据）同样降级而非抛错
+            (session as any).cacheWindow = { turns: NaN, prompt: undefined, read: -1 };
+            run();
+            assert.ok(replied.includes('缓存率: -（本会话暂无数据）'), `畸形结构应降级，实际: ${replied}`);
+        } finally {
+            (ext as any).storageSet = origSet;
+            (globalThis as any).seal.replyToSender = origReply;
+            if (origStatus) SubCmd.map['status'] = origStatus; else delete SubCmd.map['status'];
+        }
     }
 };

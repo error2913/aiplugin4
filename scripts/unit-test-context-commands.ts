@@ -90,6 +90,25 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const formatted = formatCtxStatus({ sessionId: sid, service, args: [] });
         assert.ok(formatted.includes('上下文：'));
         assert.equal(formatted.includes('v2'), false, '用户可见文本不暴露实现版本');
+
+        // 缓存行：与 .ai status 同源同实现（src/utils/cache_rate.ts）⇒ 两分支文案必须逐字符稳定，
+        // 这是「抽纯函数复用」不产生用户可见 diff 的守卫。
+        const withCache = formatCtxStatus({
+            sessionId: sid,
+            service,
+            args: [],
+            session: { ...usedSession, cacheWindow: { turns: 8, prompt: 1000, read: 735 } },
+        });
+        assert.ok(withCache.includes('缓存：命中率 73.5%（近 8 轮）'), withCache);
+        const noCache = formatCtxStatus({ sessionId: sid, service, args: [] });
+        assert.ok(noCache.includes('缓存：命中率 -（本会话暂无数据）'), noCache);
+        const zeroHit = formatCtxStatus({
+            sessionId: sid,
+            service,
+            args: [],
+            session: { ...usedSession, cacheWindow: { turns: 100, prompt: 10000, read: 0 } },
+        });
+        assert.ok(zeroHit.includes('缓存：命中率 0.0%（近 100 轮）'), '有样本但未命中 ⇒ 0.0%，不得显示「暂无数据」');
     },
 
     async testContextCommandsHideAndPurge() {
