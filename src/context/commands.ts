@@ -1,5 +1,6 @@
 // `.ai ctx` 命令逻辑：解析、执行、用户可读短文本。
 // 只依赖 ContextService/admin/运行时；权限与回复投递在 cmd 层。
+import { type CacheWindowLike, formatCachePercent } from "../utils/cache_rate";
 import { resolveContextBudgets } from "../utils/context_budget";
 
 import { contextStats, hideEvents, HideTarget, purgeSession, repairHead } from "./admin";
@@ -48,7 +49,7 @@ export interface CtxSessionLike {
     prefixProbeEnabled?: boolean;
     prefixProbe?: { count: number; hashes: string[]; throughSeq: number; firstDiffIndex: number | null };
     /** 每会话缓存命中率窗口（#163 REQ-D9-03） */
-    cacheWindow?: { turns: number; prompt: number; read: number };
+    cacheWindow?: CacheWindowLike;
     /** 本轮注入被跳过的条目数（#163 REQ-D3；当前实现恒为 0，保留展示口径） */
     injectionsSkipped?: number;
 }
@@ -193,9 +194,7 @@ export function formatCtxStatus(input: CtxCommandInput): string {
             : `前缀守卫：首差异位置 ${drift}`);
     }
     const cw = input.session?.cacheWindow;
-    lines.push(cw && cw.turns > 0
-        ? `缓存：命中率 ${((cw.read / Math.max(1, cw.prompt)) * 100).toFixed(1)}%（近 ${cw.turns} 轮）`
-        : '缓存：命中率 -（本会话暂无数据）');
+    lines.push(`缓存：命中率 ${formatCachePercent(cw)}`);
     const archivedTokens = Math.max(0, stats.unsummarizedTokens - stats.unarchivedTokens);
     if (stats.archivedThrough > 0) {
         const pendingSummary = stats.archivedThrough > stats.summarizedThrough;

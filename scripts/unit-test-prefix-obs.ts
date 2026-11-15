@@ -23,6 +23,7 @@ import {
 import { makeItem } from '../src/prompt/injections/keys';
 import { CONFIG_REBASE_KEYS, SESSION_RUNTIME_KEYS } from '../src/session/persistence';
 import { Session } from '../src/session/session';
+import { cacheHitRate, formatCachePercent } from '../src/utils/cache_rate';
 
 class FakeStorage {
     map = new Map<string, string>();
@@ -190,6 +191,31 @@ export const tests: Record<string, () => void | Promise<void>> = {
         session.noteCacheUsage({ prompt_tokens: 50 });
         assert.equal(session.cacheWindow.turns, 1);
         assert.equal(session.cacheWindow.read, 0, '缺 cache_read_tokens 按 0 计');
+    },
+
+    /** T14-20：缓存率展示口径（`.ai ctx` 与 `.ai status` 共用同一纯函数；边界夹紧、无数据不得谎报 0%） */
+    testCachePercentFormat() {
+        // 无数据：三种输入都走「暂无数据」，绝不用 0.0% 冒充
+        assert.equal(formatCachePercent(undefined), '-（本会话暂无数据）');
+        assert.equal(formatCachePercent(null), '-（本会话暂无数据）');
+        assert.equal(formatCachePercent({ turns: 0, prompt: 0, read: 0 }), '-（本会话暂无数据）');
+        assert.equal(formatCachePercent({ turns: 3, prompt: 0, read: 0 }), '-（本会话暂无数据）', 'prompt=0 不得除出 Infinity');
+
+        // 正常：一位小数 + 轮数
+        assert.equal(formatCachePercent({ turns: 8, prompt: 1000, read: 735 }), '73.5%（近 8 轮）');
+        assert.equal(formatCachePercent({ turns: 100, prompt: 10000, read: 0 }), '0.0%（近 100 轮）');
+        assert.equal(formatCachePercent({ turns: 1, prompt: 3, read: 3 }), '100.0%（近 1 轮）');
+
+        // 夹紧：网关/中转回传 read>prompt 的异常值，不得展示成 140%
+        assert.equal(formatCachePercent({ turns: 2, prompt: 100, read: 140 }), '100.0%（近 2 轮）');
+
+        // 畸形输入不抛（旧会话/脏数据）
+        assert.equal(formatCachePercent({ turns: NaN, prompt: NaN, read: NaN } as any), '-（本会话暂无数据）');
+        assert.equal(formatCachePercent({ turns: -5, prompt: -1, read: -2 }), '-（本会话暂无数据）');
+
+        // 归一化值：调用方若需原值（如后续 P1 追加绝对量）用 cacheHitRate
+        assert.equal(cacheHitRate({ turns: 8, prompt: 1000, read: 735 })!.toFixed(3), '0.735');
+        assert.equal(cacheHitRate({ turns: 0, prompt: 0, read: 0 }), null);
     },
 
     /** T14-08：前缀探针默认关闭（零成本），开启后字段可写 */

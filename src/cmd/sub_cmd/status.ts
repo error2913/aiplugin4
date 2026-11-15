@@ -4,6 +4,7 @@ import { JudgeManager } from "../../judge/judge_manager";
 import Model from "../../model/model";
 import { decisionSchedule } from "../../pipeline/decision_schedule";
 import { getRuleStore, pendingDelays } from "../../trigger/runtime";
+import { type CacheWindowLike, formatCachePercent } from "../../utils/cache_rate";
 import { fmtDate } from "../../utils/string";
 import { platformOf } from "../../utils/target_id";
 import { U } from "../privilege";
@@ -43,11 +44,23 @@ function collectTriggerStatus(sid: string): string {
     }
 }
 
+/**
+ * 缓存率展示（纯只读观测）。
+ * 与 `collectTriggerStatus` 同一契约：任何未装配/异常都降级成一行提示，绝不让 status 本体失败。
+ */
+function formatCacheRateSafe(session: { cacheWindow?: CacheWindowLike }): string {
+    try {
+        return formatCachePercent(session.cacheWindow);
+    } catch {
+        return '-（本会话暂无数据）';
+    }
+}
+
 export function registerCmdStatus() {
     const cmd = new SubCmd('status');
     cmd.desc = '查看当前AI状态';
     cmd.help = `帮助:
-【.ai status】查看当前会话 AI 状态（平台/权限/上下文轮数/各触发模式/api连接状态/触发域与判定观测）`;
+【.ai status】查看当前会话 AI 状态（平台/权限/上下文轮数/缓存率/各触发模式/api连接状态/触发域与判定观测）`;
     cmd.priv = { priv: U };
     cmd.solve = (scc: SubCmdContext) => {
         const { ctx, msg, sid, session, ret } = scc;
@@ -70,6 +83,7 @@ export function registerCmdStatus() {
         模型连接: ${connText}
         权限: ${setting.priv}
         上下文轮数: ${session.context.messages.filter(m => m.role === 'user').length}
+        缓存率: ${formatCacheRateSafe(session)}
         AI 总闸(aiEnabled): ${setting.aiEnabled ? '开启' : '关闭'}
         非指令正则触发: ${setting.regexTrigger ? '开启' : '关闭'}
         @ 触发(配置页): ${Config.trigger.AT_TRIGGER ? '开启' : '关闭'}
