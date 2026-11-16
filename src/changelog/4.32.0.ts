@@ -37,19 +37,20 @@ export default `## 前缀缓存稳定性（#163）
 
 ## OB11 核心桥改为独立协议端（插件侧适配）
 
-配套后端 \`ob11-core-bridge\` 升级到 2.0.0：默认形态从"relay 中转站"变为**独立 OB11 协议端**——海豹用一条普通的 OB11 正向 WS 连上桥，就得到一个稳定持久的虚拟账号 / 群 / 用户世界，23 个 OB11 action 全部本地应答，桥**不再拦截、也不再向任何真实协议端注入消息**。插件侧本版做了对应适配，老桥与 relay 模式照常可用：
+配套后端 \`ob11-core-bridge\` 升级到 3.0.0：形态从"relay 中转站"变成**纯粹的独立 OB11 协议端**——海豹用一条普通的 OB11 正向 WS 连上桥，就得到一个稳定持久的虚拟账号世界，23 个 OB11 action 全部本地应答。桥**不拦截、不注入、不出站**：没有任何出站连接，也没有"协议端地址"可填。插件侧本版做了对应适配，老桥照常可用：
 
-- **新增 \`hello\` 握手**（\`src/integration/core_bridge/ws_client.ts\`）：连上 \`/plugin\` 后立即发 \`{type:'hello', requestId}\`，缓存桥回的 \`mode\`/\`platform\`/\`corePort\`/\`virtualSelfId\`/\`capabilities\`/\`bridgeVersion\`。超时 3 秒、与 \`core_command\` 的 10 秒超时解耦（不进 pending 队列），失败只降级不报错——**老桥（无 \`hello\` 应答）行为完全不变**。
-- **\`core_command\` 增发 \`source\`**（\`tool_core_command.ts\`）：\`mode=standalone\` 时 payload 额外带 \`source{endpointId, messageType, groupId, userId, groupName, userRole}\`（**真实** ID，只作桥侧投影输入），由桥换成虚拟 ID；\`mode=relay\` 时报文与 1.1.x 完全一致。
+- **新增 \`hello\` 握手**（\`src/integration/core_bridge/ws_client.ts\`）：连上 \`/plugin\` 后立即发 \`{type:'hello', requestId}\`，缓存桥回的 \`mode\`/\`platform\`/\`corePort\`/\`virtualSelfId\`/\`virtualNickname\`/\`capabilities\`/\`bridgeVersion\`。超时 3 秒、与 \`core_command\` 的 10 秒超时解耦（不进 pending 队列），失败只降级不报错——**老桥（无 \`hello\` 应答）行为完全不变**。
+- **\`core_command\` 增发 \`source\`**（\`tool_core_command.ts\`）：\`mode=standalone\` 时 payload 额外带 \`source{endpointId, messageType, groupId, userId, groupName, userRole}\`（**真实** ID，只作桥侧投影输入），由桥换成虚拟 ID；\`mode\` 缺失或非 \`standalone\`（老桥）时报文与 1.1.x 完全一致。\`mode\` 现在是桥侧的**恒定值**，不再是用户可配的运行模式。
 - **\`actor.role\` 真实化**（\`command_target.ts\` 的 \`commandActorRole\`）：原先硬编码 \`'member'\`，导致 owner 专属指令（\`.dismiss\` 等）永远不可用。现在按 \`ctx.privilegeLevel\` 映射（\`>=60\` → \`owner\`，含骰主 100 / 白名单 70 / 群主 60；\`>=50\` → \`admin\`；否则 \`member\`），核心侧 \`fillPrivilege\` 据此上权限。
-- **结果字段只增不改**（\`types.ts\` / 结果渲染）：新增可选 \`mode\`、\`deliveredCount\`、\`virtualTarget\`。standalone 下 \`ambiguous\` 恒 \`false\`、\`forwardedCount\` 与 \`interceptedCount\` 恒 \`0\`（"转发到协议端"与"从协议端拦截"这两件事都随真实协议端一起消失，真实条数统一看 \`deliveredCount\`），插件渲染改读 \`deliveredCount\`（缺失时按 \`messages.length\` 兜底）并**不再向 AI 展示 ambiguous/completedBy 这类干扰信息**。顺带删掉从未使用的 \`CoreBridgeInvocation\` 类型。
-- **行为边界（写进文档，避免误判）**：standalone 下桥**没有真实投递**——核心指令的文本结果只回给 AI，不会真的发到 QQ；图片/语音/文件只有文本占位；一个桥只服务一个核心（第二条连接被 \`1013\` 拒绝）。想让结果真的进群、或多 QQ 账号，请用 relay（在桥的卡片里填「协议端地址」即恢复 1.1.x 行为）。
-- **部署侧必做一步**：把虚拟号加进海豹 \`DiceMasters\`（条目形如 \`QQ:10001\`，取值看桥启动日志或 \`/healthz.virtualSelfId\`），否则 \`MasterCheck\` 永不命中、\`PrivilegeLevel\` 上不到 100。桥的 \`/healthz\` 现为 16 字段，其中 \`protocolConnected\`/\`protocolClients\`/\`droppedProtocolEvents\` 在 standalone 下恒为 \`null\`（不再是 \`false\`/\`0\`）。
-- **文档同步**：docs/04（工具系统）、docs/05（后端配置键说明）、docs/08（后端清单与 token 例外）、docs/09（捕获/转发语义与 token）、docs/11（全篇重写：两种模式、虚拟世界与骰主列表、端口为表述中心、核心端不占路径、\`/healthz\` 字段表、排障）、docs/README、README（配置/工具章节）。**两个易踩的坑已写进文档**：海豹面板「目标地址」必须带 \`ws://\`（只填端口会静默 \`connect_fail\`，但**路径不用写**——桥把除 \`/plugin\`、\`/healthz\` 外的一切连接都当核心端），插件 \`backends.ob11-core-bridge.url\` 则必须是**完整 URL**（它连的是 \`/plugin\`，桥的端口在启动器里改，默认 \`46880\`）；桥不读通用 token \`AIPLUGIN4_BACKEND_TOKEN\`（用 \`core_token\`/\`plugin_token\`），也没有任何"通用 token 自动兜底"的回退。
+- **结果字段只增不改**（\`types.ts\` / 结果渲染）：新增可选 \`mode\`、\`deliveredCount\`、\`virtualTarget\`。\`ambiguous\` 恒 \`false\`、\`forwardedCount\` 与 \`interceptedCount\` 恒 \`0\`（"转发到协议端"与"从协议端拦截"这两件事都随真实协议端一起消失，真实条数统一看 \`deliveredCount\`），插件渲染改读 \`deliveredCount\`（缺失时按 \`messages.length\` 兜底）并**不再向 AI 展示 ambiguous/completedBy 这类干扰信息**。顺带删掉从未使用的 \`CoreBridgeInvocation\` 类型。
+- **行为边界（写进文档，避免误判）**：桥**没有真实投递**——核心指令的文本结果只回给 AI，不会真的发到 QQ；图片/语音/文件只有文本占位；一个桥只服务一个核心（第二条连接被 \`1013\` 拒绝）。想要真实 QQ 群请另接真协议端，桥不承担转发职责。
+- **部署侧必做一步**：把虚拟号加进海豹 \`DiceMasters\`（条目形如 \`QQ:10001\`，取值看桥启动日志或 \`/healthz.virtualSelfId\`），否则 \`MasterCheck\` 永不命中、\`PrivilegeLevel\` 上不到 100。桥的 \`/healthz\` 现为 15 字段。
+- **桥的配置只剩三项**：\`platform\` / \`virtual_self_id\` / \`virtual_nickname\`。删掉了「运行模式」「协议端地址/ token」「核心端 token / 插件端 token」「默认虚拟群 / 默认私聊对象 / 机器人角色 / 群人数上限」这些冗余项——群与私聊对象改为惰性生成（第一次见到真实 ID 才分号），角色与人数上限是协议常量。**token 只有一个**：就是启动器给每个后端注入的通用 token，海豹「连接」页与插件「核心桥Token」填同一个值即可（桥不再读 \`core_token\`/\`plugin_token\`）。
+- **文档同步**：docs/04（工具系统）、docs/05（后端配置键说明）、docs/08（后端清单与 token 例外）、docs/09（捕获/转发语义与 token）、docs/11（全篇重写：端口为表述中心、核心端不占路径、三项配置、虚拟世界与骰主列表、\`/healthz\` 字段表、排障）、docs/README、README（配置/工具章节）。**两个易踩的坑已写进文档**：海豹面板「目标地址」必须带 \`ws://\`（只填端口会静默 \`connect_fail\`，但**路径不用写**——桥把除 \`/plugin\`、\`/healthz\` 外的一切连接都当核心端），插件 \`backends.ob11-core-bridge.url\` 则必须是**完整 URL**（它连的是 \`/plugin\`，桥的端口在启动器里改，默认 \`46880\`）。
 
 ### 新增测试入口
 
-- \`scripts/unit-test-core-bridge.ts\`：\`hello\` 握手三分支（standalone / relay / 超时降级）、\`source\` 投影条件、\`commandActorRole\` 三档映射、结果字段缺失兜底等 12 条用例，登记在 \`npm run test:unit\` 的 coreBridge 域。
+- \`scripts/unit-test-core-bridge.ts\`：\`hello\` 握手三分支（standalone / 老桥无应答 / 超时降级）、\`source\` 投影条件、\`commandActorRole\` 三档映射、结果字段缺失兜底等 12 条用例，登记在 \`npm run test:unit\` 的 coreBridge 域。
 
 ## 开发与工程
 
