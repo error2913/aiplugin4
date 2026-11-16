@@ -440,7 +440,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 默认关闭的 OB11 action | 每框一个默认关闭的原始 OB11 action，例如 `get_group_member_list`；关闭后 AI 不会调用 |
 | 可调用指令白名单 | 每框一个 `扩展名|指令名/别名1/别名2`；同一元素内的别名用 `/` 分隔。默认已包含当前 SealDice 核心命令、内置扩展命令及全部别名，核心扩展名统一写 `core`（如 `core|roll/r/rd`） |
 | 是否允许调用所有指令 | 开启后忽略白名单，允许调用所有可解析的扩展指令；核心指令仍通过 `run_core_command` 调用 |
-| 指令前缀 | 注入到 SealDice 核心的指令前缀，通常为 `.`；核心前缀改动时需同步修改 |
+| 指令前缀 | 投给 SealDice 核心的指令消息前缀，通常为 `.`；核心前缀改动时需同步修改 |
 | 音乐服务配置 | 每框一条 JSON：`{"platform":"网易云/qq","api":"域名","cookie":"Cookie（可留空）"}`，供 `search_music` 使用；修改后需重载 JS 生效 |
 | 媒体任务并发上限 | 同时进行的语音/图片生成任务数上限（默认 3）；超出的任务排队等待 |
 | 媒体生成同步等待秒数 | 调用生图/语音工具后先等待这么多秒看是否已出结果（默认 5）：期间生成完就**当场返回结果**、不再走异步通知；超时未完成则返回任务号，生成完再自动通知并唤醒 AI。填 0 关闭等待（一律走异步） |
@@ -487,7 +487,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 > MCP 配置修改后用 `.ai mcp refresh` 立即重新解析并强制重同步工具列表（refresh 需骰主，或重载 JS）；`.ai mcp list` 查看当前平台可用服务器及工具开关状态；`.ai mcp on/off [<服务器>]` 按会话批量开启/关闭某服务器（或缺省全部当前平台服务器）下的工具（on 时跳过「禁止调用的函数」）。
 >
-> `run_core_command` 由插件本地注册，通过「后端 → 后端配置」的 `backends.ob11-core-bridge` 直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`）；`run_ext_command` 仅由插件本地实现。二者不由 MCP 提供。
+> `run_core_command` 由插件本地注册，通过「后端 → 后端配置」的 `backends.ob11-core-bridge` 直连 `ob11-core-bridge`（默认 `ws://127.0.0.1:46880/plugin`，**这一格必须是完整 URL，填纯端口会被校验拒绝**）；`run_ext_command` 仅由插件本地实现。二者不由 MCP 提供。
 
 ### 技能
 
@@ -567,7 +567,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效；图片转 base64 由插件直接下载完成，不需要 46678 后端（旧配置里的 `backends.image-url-to-base64` 不再注册/读取，可自行删除） |
+| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效；图片转 base64 由插件直接下载完成，不需要 46678 后端（旧配置里的 `backends.image-url-to-base64` 不再注册/读取，可自行删除）。**核心桥的 url 必须是完整 URL**（默认 `ws://127.0.0.1:46880/plugin`，填纯端口会让整份配置校验失败回退出厂默认）；桥自己的运行配置（`mode`/`platform`/`virtual_*`/`core_token`/`plugin_token` 等 13 键）在启动器卡片「⚙ 配置」里，端口在启动器「端口」输入框里，都不在这个 JSON 中 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
@@ -802,7 +802,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 工具组 | 工具函数 |
 |:---:|:---|
 | Dispatch | `list_tools`（按工具组列出当前平台工具）、`search_tools`（按名称/关键词/工具组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
-| Commands | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 调用核心指令） |
+| Commands | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 在桥的虚拟端点上执行核心指令；桥默认是独立 OB11 协议端） |
 | Timers | `set_timer`、`show_timer_list`、`cancel_timer`、`get_time`（返回当前时间与时区偏移；4.32.0 起历史消息不再带 `[time]`，AI 需要"现在几点"时用它） |
 | Triggers | `set_trigger_condition` |
 | Memory | `memory_recall`、`memory_add`、`memory_update`、`memory_delete`、`memory_consolidate`、`memory_reflect`、`memory_mental_model`（action: list/view/create/refresh/clear/delete） |
@@ -831,7 +831,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 > 语音/图片生成说明（4.24.0 起内置）：`generate_audio` / `text_to_image` 是**异步任务**——提交后**先等一段同步窗口**（「工具 → 媒体生成同步等待秒数」，默认 5 秒），窗口内就生成完则**当场把结果返回给 AI**（图片直接给 `[img:图片ID]`、语音给 record 段指引），不再走异步通知；窗口内没完成则立即返回任务号，生成完成后写入会话通知并**尽力唤醒 AI**投递（该送达**免触发令牌桶**，桶空也送达；**待机中同样唤醒**，因为这是用户请求的结果而不是主动搭话；会话忙则通知留在队列，由**本轮结束时的补触发**接手，不会丢；端点离线时通知保留、下一轮呈现）。命令 `.ai tts` / `.ai tti` 发起的由插件直接投递。AI 收到完成通知后：**语音走 `call_ob11_api` 的 record 段**（`[audio:xxx]` 只认「资源」页配置的本地语音资源名，不接受生成结果的路径/URL），**图片优先直接在回复里写 `[img:图片ID]`**（系统会自动发送，**非必要不要为此调用 `call_ob11_api`**）。任务队列可用 `media_tasks` 工具或 `.ai media` 查看与取消。请求结构默认由内置供应商预设提供（见「模型」页说明），参数（音色/语速/尺寸等）由「模型规则」`[params]` 与模板里的 `{占位符}` 决定。
 
-> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需中间件；`run_core_command` 通过 OB11 核心桥注入假消息，需启动 `ob11-core-bridge`（SealDice 的 OB11 网络依赖连接中间件 `/core`，并在「后端 → 后端配置」的 `backends.ob11-core-bridge` 填地址，默认 `ws://127.0.0.1:46880/plugin`）。
+> 扩展/核心指令工具不再要求会话先出现 `.r`：`run_ext_command` 在插件内本地直调扩展 `solve`，无需核心桥；`run_core_command` 通过 OB11 核心桥在**桥自己的虚拟端点上**产生一条指令消息事件来执行核心指令，需启动 `ob11-core-bridge`（默认是**独立 OB11 协议端**：不连真实协议端、不需要真实 QQ 账号，SealDice 的 OB11 网络依赖以一条正向 WS 连上桥的 `ws://127.0.0.1:<端口>`——**核心端不占用路径，不填路径即可**，端口默认 `46880`、在启动器里改；并在「后端 → 后端配置」的 `backends.ob11-core-bridge` 填 `ws://127.0.0.1:46880/plugin` 这一**完整 URL**）。桥本身不再拦截、也不再向任何真实协议端注入消息，所以核心指令的结果**只回给 AI、不会真的发到 QQ**；想让结果真的发进群里请改用 relay 模式（在桥的卡片里填「协议端地址」）。另外记得把虚拟号 `QQ:<virtual_self_id>`（默认 `QQ:10001`，取自桥启动日志或 `/healthz.virtualSelfId`）加进海豹 `DiceMasters`，否则骰主权限上不到 100。
 
 ---
 

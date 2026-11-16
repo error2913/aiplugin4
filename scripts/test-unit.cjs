@@ -66,6 +66,8 @@ const entries = [
     ['imageHost', 'unit-test-image-host.ts'],
     ['imageFetch', 'unit-test-image-fetch.ts'],
     ['backendConfig', 'unit-test-backend-config.ts'],
+    // 核心桥 standalone 适配（hello 握手 / source 投影 / role 映射）：与后端配置语义相邻
+    ['coreBridge', 'unit-test-core-bridge.ts'],
     // 独立启动装配回归入口（首次 Config.registerConfig()，验证配置应用时机）
     ['boot', 'unit-test-boot.ts'],
     ['contextV2', 'unit-test-context-v2.ts'],
@@ -140,7 +142,7 @@ const DOMAINS = {
     agent: ['aux'],
     session: ['claimTable', 'chatOutcome'],
     subagent: ['subagent', 'subagentContext'],
-    core: ['boot', 'protocol'],
+    core: ['boot', 'protocol', 'coreBridge'],
     web: ['web'],
 };
 
