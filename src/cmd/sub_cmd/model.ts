@@ -38,7 +38,7 @@ function activeStates(): ConnState[] {
     return Model.states.filter(s => s.status !== 'ignored');
 }
 
-/** 连接状态单行（供 list / 总览 / status 复用；只传非 ignore 连接） */
+/** 连接状态单行（供 list / 总览复用；只传非 ignore 连接） */
 export function formatConnState(state: ConnState): string {
     const head = `[${state.connIndex}] ${state.provider || '(未知)'} · ${state.baseUrl || '(无地址)'}`;
     if (state.status === 'pending') return `${head} · 拉取中…`;

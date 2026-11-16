@@ -92,6 +92,7 @@ export class TriggerRuleStore {
             }
         }
         if (this.bad.length > 0) {
+            Logger.warning(`规则库有 ${this.bad.length} 条校验失败，已隔离到 ${KEY_BAD}（不影响其余规则）`);
             try {
                 getHost().storage.set(KEY_BAD, JSON.stringify(this.bad));
             } catch {

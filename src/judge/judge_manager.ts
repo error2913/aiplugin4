@@ -46,7 +46,7 @@ interface PendingJudgeMessage {
     addressed: boolean;
 }
 
-/** 最近一次判定结论（.ai status 观测用；不持久化） */
+/** 最近一次判定结论（仅日志/调试可见；不持久化） */
 interface JudgeLastDecision {
     at: number;
     action: string;
@@ -467,7 +467,7 @@ export class JudgeManager {
         this.startWaitRound(ctx, session, '判定WAIT');
     }
 
-    /** 会话判定状态快照（.ai status 观测用；无状态返回 null） */
+    /** 会话判定状态快照（当前无命令消费者，留作调试/将来观测；无状态返回 null） */
     static getSessionStats(sid: string): {
         waitUntil: number;
         pending: boolean;

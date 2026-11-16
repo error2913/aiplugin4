@@ -1,4 +1,4 @@
-// 单元测试入口（拆分自 scripts/unit-test-entry.ts）：memory 域，16 个用例。
+// 单元测试入口（拆分自 scripts/unit-test-entry.ts）：memory 域，19 个用例。
 // 用例顺序与拆分前一致；随 scripts/test-unit.cjs 打包后加载运行，不会启动 SealDice/QQ。
 // @ts-nocheck
 import {
@@ -551,6 +551,65 @@ export const tests: Record<string, () => void | Promise<void>> = {
         }
     },
 
+    /** .ai status：精简后的字段面（模型只留名 / 无 (aiEnabled) / 无活跃时间段(旧) / 无触发域与判定块） */
+    testCmdStatusSlimOutput(): void {
+        const origReply = (globalThis as any).seal.replyToSender;
+        const origStatus = SubCmd.map['status'];
+        let replied = '';
+        (globalThis as any).seal.replyToSender = (_ctx: any, _msg: any, text: string) => { replied = text; };
+        try {
+            registerCmdStatus();
+            const session = new Session();
+            session.sessionId = 'QQ:20002';
+            session.sessionType = 'user';
+            SubCmd.map['status'].solve({
+                ctx: { endPoint: { userId: 'QQ:20002' }, player: { userId: 'QQ:20002', name: '测试员' } } as any,
+                msg: {} as any, cmdArgs: {} as any,
+                epId: 'QQ:20002', uid: 'QQ:20002', gid: '', sid: 'QQ:20002',
+                session, page: 1, ret: {} as any,
+            });
+
+            // R1 模型区：只留模型名，不展示连接详情/地址/模型数
+            assert.ok(/^ {8}模型: /m.test(replied), `模型行必须 8 空格缩进，实际: ${replied}`);
+            assert.ok(!replied.includes('模型连接'), '不得再展示「模型连接」行');
+            assert.ok(!replied.includes('模型(全局)'), '标签不再带「(全局)」括注');
+            for (const bad of ['http://', 'https://', '个模型', '拉取中', '钉住']) {
+                assert.ok(!replied.includes(bad), `不得展示连接详情「${bad}」，实际: ${replied}`);
+            }
+
+            // R2 去 (aiEnabled)
+            assert.ok(!replied.includes('(aiEnabled)'), '不得再出现 (aiEnabled)');
+            assert.ok(/^ {8}AI 总闸: /m.test(replied), `标签应为「AI 总闸: 」，实际: ${replied}`);
+
+            // R3 删「活跃时间段(旧)」
+            assert.ok(!replied.includes('活跃时间段'), '不得再展示「活跃时间段(旧)」');
+            assert.ok(replied.includes('活跃时间模式(a):'), '活跃时间模式开关必须保留');
+
+            // R4 删触发域与判定块
+            for (const bad of ['触发域', '判定配置', 'WAIT 剩余', '最近决策', 'delay 挂起', '评分在飞', '触发规则']) {
+                assert.ok(!replied.includes(bad), `不得再展示「${bad}」，实际: ${replied}`);
+            }
+
+            // 该留的一行都不能少
+            for (const keep of [
+                '平台: ', '会话类型: ', '权限: ', '上下文轮数:', '缓存率: ', 'AI 总闸: ',
+                '非指令正则触发: ', '@ 触发(配置页): ', '事件触发(e): ', '计数器模式(c): ',
+                '延迟模式(d): ', '概率模式(p): ', 'timer 模式(t): ', '活跃时间模式(a): ', '评分触发(j): ',
+            ]) {
+                assert.ok(replied.includes(keep), `字段「${keep}」不得丢，实际: ${replied}`);
+            }
+
+            // 行数与缩进契约：sid + 16 字段；字段逐行、8 空格、无「｜」并列
+            const lines = replied.split('\n');
+            assert.equal(lines.length, 17, `输出应恰好 17 行，实际 ${lines.length} 行: ${replied}`);
+            assert.ok(lines.slice(1).every(line => line.startsWith('        ')), `字段行必须 8 空格缩进，实际: ${replied}`);
+            assert.ok(!replied.includes('｜'), '不得出现「｜」并列');
+        } finally {
+            (globalThis as any).seal.replyToSender = origReply;
+            if (origStatus) SubCmd.map['status'] = origStatus; else delete SubCmd.map['status'];
+        }
+    },
+
     /** .ai status：缓存率展示（有数据显示百分比 / 无数据显示短横，不谎报 0%） */
     testCmdStatusShowsCacheRate(): void {
         const origReply = (globalThis as any).seal.replyToSender;
@@ -610,8 +669,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
                 session, page: 1, ret: {} as any,
             });
 
-            // 首轮预热：让 trigger/store 的首次 lazy load 完成（seal 桩 storageGet 返回 ''
-            // ⇒ 规则库为空 ⇒ 本就不写；预热是防御性写法，避免把既有首次加载写算到缓存行头上）
+            // 首轮预热：status 已不再触碰 trigger/store（触发域观测块删除），此处保留为防御性写法，
+            // 避免将来又引入懒加载时把「首次加载写」算到缓存行头上
             run();
             (ext as any).storageSet = (...args: any[]) => { writes += 1; return (origSet as any)?.apply(ext, args); };
             session.noteCacheUsage({ prompt_tokens: 500, cache_read_tokens: 250 });
