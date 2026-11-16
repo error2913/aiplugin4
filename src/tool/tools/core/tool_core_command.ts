@@ -2,19 +2,33 @@
 // 扩展指令仍由 run_ext_command 本地直调扩展 solve，不经过核心桥。
 import Config from "../../../config/config";
 import { CoreBridgeResult } from "../../../integration/core_bridge/types";
-import { callCoreBridgeCommand } from "../../../integration/core_bridge/ws_client";
+import { callCoreBridgeCommand, ensureCoreBridgeHello } from "../../../integration/core_bridge/ws_client";
 import Logger from "../../../logger";
 import { callOb11ApiDirect } from "../../../transport/ob11/dispatcher";
-import { normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
+import { getRawId, normalizeGroupId, normalizeUserId, platformOf } from "../../../utils/target_id";
 import { withTimeout } from "../../../utils/timeout";
 import { isAllowedCore, splitEntry, whitelistEntries } from "../../command_catalog";
-import { resolveCommandTarget } from "../../command_target";
+import { commandActorRole, resolveCommandTarget } from "../../command_target";
 import Tool from "../../tool";
 
 const log = Logger.withTag('run_core_command');
 
-/** 获取核心假消息发送者的真实平台昵称/群名片，避免把当前 AI 会话用户昵称错传给 trigger。 */
-async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string): Promise<string> {
+/** 拿不到真实昵称时的回退值：当前会话用户用会话里的名字，其它人用「用户<ID>」。 */
+function fallbackCommandActorNickname(ctx: seal.MsgContext, userId: string): string {
+    const rawUserId = normalizeUserId(userId, platformOf(ctx)) || userId;
+    return rawUserId === normalizeUserId(ctx.player && ctx.player.userId || '', platformOf(ctx))
+        ? String(ctx.player && ctx.player.name || '')
+        : `用户${rawUserId}`;
+}
+
+/**
+ * 获取核心假消息发送者的真实平台昵称/群名片，避免把当前 AI 会话用户昵称错传给 trigger。
+ *
+ * standalone 下短路（REQ-D7-04）：虚拟账号就是全部可见世界，查真实 OB11 只会落在真号上，
+ * 命中率取决于真实世界；昵称随 `actor` 一次给全即可。
+ */
+async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string, standalone: boolean): Promise<string> {
+    if (standalone) return fallbackCommandActorNickname(ctx, userId);
     const rawUserId = normalizeUserId(userId, platformOf(ctx)) || userId;
     const rawGroupId = ctx.group ? normalizeGroupId(ctx.group.groupId, platformOf(ctx)) : '';
     if (!rawUserId) return '';
@@ -32,9 +46,7 @@ async function resolveCommandActorNickname(ctx: seal.MsgContext, userId: string)
     } catch (e) {
         log.debug(`[run_core_command] 获取 trigger=${rawUserId} 昵称失败，使用回退值: ${e instanceof Error ? e.message : String(e)}`);
     }
-    return rawUserId === normalizeUserId(ctx.player && ctx.player.userId || '', platformOf(ctx))
-        ? String(ctx.player && ctx.player.name || '')
-        : `用户${rawUserId}`;
+    return fallbackCommandActorNickname(ctx, userId);
 }
 
 function captureOptions(args: { [key: string]: any }, defaultMaxMessages: number, defaultSettleMs: number): {
@@ -69,9 +81,20 @@ function extractAuthorizedCommand(raw: string): string {
     return s.split(/\s+/, 1)[0] || '';
 }
 
-function formatCoreBridgeResult(result: CoreBridgeResult): string {
+function formatCoreBridgeResult(result: CoreBridgeResult, standalone = false): string {
     if (!result.ok) return `中转执行失败：${result.error || '未知错误'}`;
-    const texts = (result.messages || []).map(item => item.text || '').filter(Boolean);
+    const messages = result.messages || [];
+    const texts = messages.map(item => item.text || '').filter(Boolean);
+    if (standalone) {
+        // standalone 下没有"转发到协议端/从协议端拦截"这两件事，也没有 ambiguous/completedBy 的概念：
+        // 条数统一读 deliveredCount（缺失时按 messages.length 兜底），老字段一律不向 AI 展示（REQ-D7-05）。
+        const delivered = typeof result.deliveredCount === 'number' && Number.isFinite(result.deliveredCount)
+            ? result.deliveredCount
+            : messages.length;
+        if (!texts.length) return delivered > 0 ? `核心返回了 ${delivered} 条非文本消息` : '核心未返回文本消息';
+        const body = texts.join('\n');
+        return delivered > texts.length ? `${body}\n（另有 ${delivered - texts.length} 条结果无文本）` : body;
+    }
     const body = texts.length ? texts.join('\n') : '核心未返回文本消息';
     const flags = [result.ambiguous ? '消息关联存在歧义' : '', result.completedBy ? `结束方式:${result.completedBy}` : ''].filter(Boolean);
     return `${body}${flags.length ? `\n（${flags.join('，')}）` : ''}`;
@@ -145,9 +168,23 @@ export function registerCoreCommandTool(): Tool {
         };
         if (!ctx.isPrivate) target.groupId = String(ctx.group && ctx.group.groupId || '').replace(/^.+:/, '');
 
+        // standalone 下必须额外给 `source`（真实 ID 只作投影输入，桥换成虚拟 ID 再进核心）；
+        // relay（含老桥）报文保持 1.1.x 原样，绝不新增额外字段（REQ-D7-02）。
+        let standalone = false;
+
         try {
+            const hello = await ensureCoreBridgeHello();
+            standalone = hello.mode === 'standalone';
             const payload: {
                 target: typeof target;
+                source?: {
+                    endpointId: string;
+                    messageType: 'private' | 'group';
+                    groupId?: string;
+                    userId: string;
+                    groupName?: string;
+                    userRole?: string;
+                };
                 actor: { userId: string; nickname: string; role: string };
                 raw_message?: string;
                 command?: { raw: string; name: string; args: string[] };
@@ -159,14 +196,34 @@ export function registerCoreCommandTool(): Tool {
                 target,
                 actor: {
                     userId: commandTarget.effectiveTrigger || target.selfId,
-                    nickname: await resolveCommandActorNickname(ctx, commandTarget.effectiveTrigger || target.selfId),
-                    role: 'member'
+                    nickname: await resolveCommandActorNickname(ctx, commandTarget.effectiveTrigger || target.selfId, standalone),
+                    role: commandActorRole(ctx)
                 },
                 capture: options.capture,
                 timeoutMs: options.timeoutMs,
                 trigger: commandTarget.effectiveTrigger,
                 at: commandTarget.at
             };
+            if (standalone) {
+                const platform = platformOf(ctx);
+                const actorUserId = commandTarget.effectiveTrigger || target.selfId;
+                // 真实 ID 一律剥掉平台前缀再给桥：target_id 明确「绝不默认 QQ」，拿不到平台就按裸 ID 透传。
+                const normalizedUser = normalizeUserId(actorUserId, platform);
+                const source: NonNullable<typeof payload.source> = {
+                    endpointId: String(ctx.endPoint.userId || ''),
+                    messageType: target.messageType,
+                    userId: normalizedUser ? getRawId(normalizedUser) : actorUserId,
+                    userRole: payload.actor.role
+                };
+                if (target.messageType === 'group') {
+                    const normalizedGroup = ctx.group ? normalizeGroupId(ctx.group.groupId, platform) : null;
+                    const groupId = normalizedGroup ? getRawId(normalizedGroup) : String(ctx.group && ctx.group.groupId || '').replace(/^.+:/, '');
+                    if (groupId) source.groupId = groupId;
+                    const groupName = String(ctx.group && ctx.group.groupName || '').trim();
+                    if (groupName) source.groupName = groupName;
+                }
+                payload.source = source;
+            }
             if (hasRawMessage) payload.raw_message = rawMessage;
             else {
                 const prefix = Config.tool.COMMAND_PREFIX;
@@ -174,7 +231,9 @@ export function registerCoreCommandTool(): Tool {
                 payload.command = { raw, name: command, args: cmdArgs };
             }
             const result = await callCoreBridgeCommand(payload, options.timeoutMs || 10000);
-            return `核心指令 core|${authorizedCommand} 返回：\n${formatCoreBridgeResult(result)}`;
+            // 桥在 result 里回的 mode 比 hello 缓存更新（老桥两者都没有），取并集判断渲染口径。
+            const resultStandalone = result.mode ? result.mode === 'standalone' : standalone;
+            return `核心指令 core|${authorizedCommand} 返回：\n${formatCoreBridgeResult(result, resultStandalone)}`;
         } catch (e) {
             log.warning(`[run_core_command] 调用 core|${authorizedCommand} 失败:${e instanceof Error ? e.message : String(e)}`);
             return `核心指令 core|${authorizedCommand} 调用失败：${e instanceof Error ? e.message : String(e)}`;

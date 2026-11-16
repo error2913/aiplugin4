@@ -1,3 +1,4 @@
+import { PRIVILEGE_LEVEL_MAP } from "../config/static_config/permission";
 import { createCtx, createMsg } from "../utils/seal";
 import { getPlatform, getRawId, normalizeGroupId, normalizeUserId, platformOf } from "../utils/target_id";
 
@@ -19,6 +20,20 @@ export function currentCommandUserId(ctx: seal.MsgContext): string {
     return normalizeCommandUserId(ctx.player && ctx.player.userId, hint)
         || normalizeCommandUserId(ctx.endPoint.userId, hint)
         || '';
+}
+
+/**
+ * 把海豹权限等级映射成 OB11 的 `sender.role`（只有 owner/admin/member 三值）。
+ *
+ * 注意 `PRIVILEGE_LEVEL_MAP.owner` 在海豹里指**群主**（60），不是骰主（master=100）：
+ * 群主 60、白名单 70、骰主 100 都落到 `'owner'`；群管 50 才是 `'admin'`。
+ * 核心侧 `fillPrivilege` 只认 `owner`/`admin` 两种字符串，映射错会让 owner 指令永远不可用。
+ */
+export function commandActorRole(ctx: seal.MsgContext): 'owner' | 'admin' | 'member' {
+    const level = Number((ctx && ctx.privilegeLevel) ?? 0);
+    if (level >= PRIVILEGE_LEVEL_MAP.owner) return 'owner';
+    if (level >= PRIVILEGE_LEVEL_MAP.admin) return 'admin';
+    return 'member';
 }
 
 export function qualifyCommandUserId(ctx: seal.MsgContext, userId: string): string {
