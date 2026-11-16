@@ -37,7 +37,7 @@ export default `## 前缀缓存稳定性（#163）
 - **结果字段只增不改**（\`types.ts\` / 结果渲染）：新增可选 \`mode\`、\`deliveredCount\`、\`virtualTarget\`。standalone 下 \`ambiguous\` 恒 \`false\`、\`forwardedCount\` 与 \`interceptedCount\` 恒 \`0\`（"转发到协议端"与"从协议端拦截"这两件事都随真实协议端一起消失，真实条数统一看 \`deliveredCount\`），插件渲染改读 \`deliveredCount\`（缺失时按 \`messages.length\` 兜底）并**不再向 AI 展示 ambiguous/completedBy 这类干扰信息**。顺带删掉从未使用的 \`CoreBridgeInvocation\` 类型。
 - **行为边界（写进文档，避免误判）**：standalone 下桥**没有真实投递**——核心指令的文本结果只回给 AI，不会真的发到 QQ；图片/语音/文件只有文本占位；一个桥只服务一个核心（第二条连接被 \`1013\` 拒绝）。想让结果真的进群、或多 QQ 账号，请用 relay（在桥的卡片里填「协议端地址」即恢复 1.1.x 行为）。
 - **部署侧必做一步**：把虚拟号加进海豹 \`DiceMasters\`（条目形如 \`QQ:10001\`，取值看桥启动日志或 \`/healthz.virtualSelfId\`），否则 \`MasterCheck\` 永不命中、\`PrivilegeLevel\` 上不到 100。桥的 \`/healthz\` 现为 16 字段，其中 \`protocolConnected\`/\`protocolClients\`/\`droppedProtocolEvents\` 在 standalone 下恒为 \`null\`（不再是 \`false\`/\`0\`）。
-- **文档同步**：docs/04（工具系统）、docs/05（后端配置键说明）、docs/08（后端清单与 token 例外）、docs/09（捕获/转发语义与 token）、docs/11（全篇重写：两种模式、虚拟世界与骰主列表、端口为表述中心但面板必须填完整 URL、\`/healthz\` 字段表、排障）、docs/README、README（配置/工具章节）。**两个易踩的坑已写进文档**：海豹面板「目标地址」与插件 \`backends.ob11-core-bridge.url\` 都必须填**完整 URL**（桥的端口在启动器里改，默认 \`46880\`）；桥不读通用 token \`AIPLUGIN4_BACKEND_TOKEN\`（用 \`core_token\`/\`plugin_token\`），也没有任何"通用 token 自动兜底"的回退。
+- **文档同步**：docs/04（工具系统）、docs/05（后端配置键说明）、docs/08（后端清单与 token 例外）、docs/09（捕获/转发语义与 token）、docs/11（全篇重写：两种模式、虚拟世界与骰主列表、端口为表述中心、核心端不占路径、\`/healthz\` 字段表、排障）、docs/README、README（配置/工具章节）。**两个易踩的坑已写进文档**：海豹面板「目标地址」必须带 \`ws://\`（只填端口会静默 \`connect_fail\`，但**路径不用写**——桥把除 \`/plugin\`、\`/healthz\` 外的一切连接都当核心端），插件 \`backends.ob11-core-bridge.url\` 则必须是**完整 URL**（它连的是 \`/plugin\`，桥的端口在启动器里改，默认 \`46880\`）；桥不读通用 token \`AIPLUGIN4_BACKEND_TOKEN\`（用 \`core_token\`/\`plugin_token\`），也没有任何"通用 token 自动兜底"的回退。
 
 ### 新增测试入口
 

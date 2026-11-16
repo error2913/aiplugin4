@@ -29,7 +29,7 @@ SealDice 的 JS 插件无法直接调用核心指令（`.ext`、`.help` 等）�
 
 ```text
 standalone（默认）
-  SealDice  ──正向 WS──>  /core 或 /core/ws
+  SealDice  ──正向 WS──>  ws://<host>:<端口>   （任意路径，通常不带路径）
       │                        │
       │  action(get_login_info / send_group_msg / ...)
       │                        ▼
@@ -41,7 +41,7 @@ standalone（默认）
 
 | 端点 | 用途 |
 | --- | --- |
-| `/core`、`/core/ws` | SealDice 核心正向 WS，海豹**主动连接**本端点（两条路径都接受，历史写法继续可用） |
+| 核心端（**不占用路径**） | SealDice 核心正向 WS，海豹**主动连接** `ws://<host>:<端口>`；不带路径最省事，`/`、`/core`、`/core/ws` 或任意自定义路径都等价接受 |
 | `/plugin` | 插件控制 WS：`hello` 握手 / `core_command` / `ping` |
 | `/healthz` | 健康检查，16 个字段（见下） |
 | 协议端（出站，**仅 relay**） | 桥作为 WS **客户端**主动连接你在配置里填写的协议端地址 |
@@ -71,7 +71,6 @@ standalone（默认）
 | `AIPLUGIN4_BRIDGE_VIRTUAL_GROUP_NAME` | `AI 测试群` | 默认虚拟群名 |
 | `AIPLUGIN4_BRIDGE_VIRTUAL_PEER_ID` | `30002` | 私聊默认对象号 |
 | `AIPLUGIN4_BRIDGE_VIRTUAL_MAX_MEMBER_COUNT` | `200` | 虚拟群人数上限，**必须 > 0**（为 0 会被海豹判成"已退群"） |
-| `AIPLUGIN4_BRIDGE_CORE_PATH` / `_CORE_PATHS` | `/core` / `/core,/core/ws` | 核心 WS 路径与路径集合（逗号分隔，覆盖默认） |
 | `AIPLUGIN4_BRIDGE_CORE_TOKEN` | 空 | 核心端（SealDice 连接）token；裸值或 `Bearer <token>` 都认 |
 | `AIPLUGIN4_BRIDGE_PLUGIN_PATH` / `_PLUGIN_TOKEN` | `/plugin` / 空 | 插件控制 WS 路径与 token（插件以 `access_token` 查询参数传入） |
 | `AIPLUGIN4_BRIDGE_PROTOCOL_URL` / `_TOKEN` | 空 | **仅 relay**：协议端 WS 地址与 token（token 同时以 `access_token` 查询参数与 Bearer 头发送） |
@@ -84,17 +83,17 @@ standalone（默认）
 
 ## SealDice 侧配置
 
-**你只需要记住端口（默认 `46880`，在启动器里改）；海豹面板「目标地址」填 `ws://127.0.0.1:<端口>/core`（完整 URL，SealDice 的 OB11 适配器不会替你补 `ws://`）。**
+**你只需要记住端口（默认 `46880`，在启动器里改）；海豹面板「目标地址」填 `ws://127.0.0.1:<端口>` 就行，不用带任何路径（SealDice 的 OB11 适配器不会替你补 `ws://`）。**
 
 1. 打开海豹 WebUI →「连接」→ 新增 **OB11 正向 WebSocket**；
-2. 「目标地址」填完整 URL：`ws://127.0.0.1:<端口>/core`（端口取启动器里的实际值；`/core` 与 `/core/ws` 都接受）；
+2. 「目标地址」填 `ws://127.0.0.1:<端口>`（端口取启动器里的实际值，**不带路径**；桥不按路径认核心端，末尾多写 `/core` 之类也照常工作）；
 3. 桥的「⚙ 配置」里填了「核心端 token」时，海豹这一格也要填同一个值；
 4. 保存后海豹会以虚拟账号 `QQ:<virtual_self_id>`（默认 `10001`）上线，默认群 `20002`、默认私聊对象 `30002`；
 5. **必须做一步**：把虚拟号加进 `serve.yaml` 的 `DiceMasters`，条目写 `QQ:<virtual_self_id>`（默认即 `QQ:10001`）。否则 `MasterCheck` 永不命中、`PrivilegeLevel` 上不到 100，`.master` 相关与需要 ownership 的指令会全部降级。
 
 虚拟号的取值来源有三处、口径一致：桥启动日志的 `standalone 虚拟账号：QQ:10001`、`/healthz` 的 `virtualSelfId`、`/plugin` 的 `hello_result.virtualSelfId`。
 
-> **不要**把端口单独填进这一格（只填 `46880` 这类默认端口值）：OB11 适配器不做 scheme 补全，会变成 `NewClient("46880")`，表现为**静默 `connect_fail`**。
+> **不要**把端口单独填进这一格（只填 `46880` 这类默认端口值）：OB11 适配器不做 scheme 补全，会变成 `NewClient("46880")`，表现为**静默 `connect_fail`**。但**路径可以完全不写**——桥把除 `/plugin`、`/healthz` 之外的所有连接都当核心端。
 >
 > 端口的四条来源与优先级：`.runtime.json` 的 `config.<name>.port` → 旧版 `ports` 字段 → 注册表里的 `port`（默认 `46880`）→ 海豹面板地址里你手抄的那个端口。前三者由启动器统一管理，**第四者不会自动同步**：改端口后要重启后端，并同步改海豹面板那一格。可用 `curl http://127.0.0.1:<端口>/healthz` 的 `corePort` 核对实际生效端口。
 >
@@ -219,12 +218,12 @@ standalone 下**一个桥只服务一个核心**：已是 `1` 条核心连接时
 
 | 现象 | 检查 |
 | --- | --- |
-| 海豹面板显示端点离线 / 日志 `connect_fail` | 最常见原因：**面板「目标地址」里填的是纯端口**（如 `46880`）。必须填完整 URL `ws://127.0.0.1:<端口>/core`（默认端口 `46880`，在启动器里改；改了端口要同步改这一格）。再核对桥是否已启动、端口是否被占用 |
+| 海豹面板显示端点离线 / 日志 `connect_fail` | 最常见原因：**面板「目标地址」里填的是纯端口**（如 `46880`）。必须填完整 URL `ws://127.0.0.1:<端口>`（默认端口 `46880`，在启动器里改；改了端口要同步改这一格；路径不用写）。再核对桥是否已启动、端口是否被占用 |
 | `run_core_command` 不可用 / 报核心桥未连接 | `backends.ob11-core-bridge.url` 是否为**完整 URL**（默认 `ws://127.0.0.1:46880/plugin`）、`ob11-core-bridge` 是否已启动。填成纯端口会让整份后端配置校验失败回退出厂默认 |
 | 海豹连上了但指令全失效 | 看 `/healthz` 的 `coreConnected`；看桥日志是否报 `standalone 模式仅支持单个 SealDice 核心`（已有别的核心在连）；确认 `virtual_max_member_count > 0`（为 0 时海豹会认为机器人已退群） |
 | 管理指令（`.master` / `.send to` 等）不可用、`PrivilegeLevel` 上不到 100 | `DiceMasters` 里是否加了 `QQ:<virtualSelfId>`（默认 `QQ:10001`）；取值看启动日志的 `standalone 虚拟账号：QQ:...` 或 `/healthz.virtualSelfId` |
 | `run_ext_command` 执行失败 / 无响应 | 扩展是否已安装、指令名是否正确（`扩展名|指令名`）、是否在白名单、指令本身是否抛异常；与桥无关 |
-| 执行无响应 / 超时 | 核心是否已连上 `/core`（看桥日志与 `/healthz.coreConnected`）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
+| 执行无响应 / 超时 | 核心是否已连上桥（看桥日志与 `/healthz.coreConnected`）、指令前缀是否正确、目标群/私聊 id 是否正确、指令是否在白名单 |
 | 返回 `ambiguous=true` | 只可能是 relay：同 lane 并发或缺少 reply 引用；调整 `captureMode` / `settleMs`。standalone 下恒为 `false` |
 | 改了虚拟号/平台名"没生效" | `mode` / `platform` / `virtual_*` 全部**只在启动时注入**，改完必须**重启该后端**；改虚拟机器人号还会让海豹侧旧状态对不上（预期行为） |
 | `platform` 改了但海豹面板还是 QQ | 设计如此：`platform` 只影响桥侧日志 / `/healthz` / `hello_result`，海豹核心把 `QQ` 写死了 |
