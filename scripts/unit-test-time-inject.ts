@@ -10,6 +10,19 @@ import { fmtDateTz } from '../src/utils/string';
 /** 固定时刻：UTC 2026-11-09 14:13:54 → 东八区 22:13:54 */
 const FIXED_TS = Math.floor(Date.UTC(2026, 10, 9, 14, 13, 54) / 1000);
 
+/**
+ * `fmtDate`（无偏移版，`renderTimerText` 用它）渲染的是**宿主本地时区**墙钟时间。
+ * 断言里绝不能写死 "+08:00" 的字符串：CI 跑在 UTC，本机跑在 Asia/Shanghai ——
+ * 写死会让同一份代码在 CI 上必红（2026-11-16 的 `check / check` 就是这么红的）。
+ * 这里用与时区无关的方式算出期望值：期望 = 同一个 Date 对象的本地字段。
+ */
+function localWall(ts: number): string {
+    const d = new Date(ts * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} `
+        + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 interface CapturedWrite { text: string; systemName?: string }
 
 function makeCapturingSession(lastMessageAt: () => number) {
@@ -131,8 +144,9 @@ export const tests = {
     /** T13-14：target 定时器文本不含 "现在"的绝对时间（无 Triggered at） */
     testRenderTimerTextTarget(): void {
         const text = renderTimerText('target', { set: FIXED_TS, target: FIXED_TS + 3600, prompt: 'do it' });
-        assert.ok(text.includes('Timer set at: 2026-11-09 22:13:54'));
-        assert.ok(text.includes('Target time: 2026-11-09 23:13:54'));
+        // 用宿主本地墙钟算期望（`fmtDate` 就是本地时区），不写死 "+08:00"：CI 是 UTC
+        assert.ok(text.includes(`Timer set at: ${localWall(FIXED_TS)}`), text);
+        assert.ok(text.includes(`Target time: ${localWall(FIXED_TS + 3600)}`), text);
         assert.ok(text.includes('Prompt: do it'));
         assert.equal(text.includes('Triggered at:'), false);
     },
@@ -143,7 +157,7 @@ export const tests = {
         assert.ok(text.includes('Interval: 3600s'), text);
         assert.equal(text.includes('1970'), false);
         assert.ok(text.includes('Remaining triggers: 2'));
-        assert.ok(text.includes('Timer set at: 2026-11-09 22:13:54'));
+        assert.ok(text.includes(`Timer set at: ${localWall(FIXED_TS)}`), text);
         assert.equal(text.includes('Triggered at:'), false);
         const unlimited = renderTimerText('interval', { set: FIXED_TS, intervalSec: 300, count: -1, prompt: 'x' });
         assert.ok(unlimited.includes('Interval: 300s'));
