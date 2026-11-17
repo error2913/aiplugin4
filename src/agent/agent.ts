@@ -545,8 +545,9 @@ export default class Agent {
 
     /**
      * 模型分类错误的自动处理（runInternal / runStreamInner 共用）：
-     * - context_too_long：v2 只把本轮请求预算收紧到报文窗口内（目标=min(本地预算, 报文窗口×0.8)）后
-     *   直接重发，不调用摘要；无事件账本的旧路径仍走「观察归档」，返回 retry；
+     * - context_too_long：按报文里的模型窗口算目标（目标=min(本地预算, 报文窗口×0.8)）后**零 LLM 硬切
+     *   归档**推进水位、再重发，不调用摘要；收敛失败（只剩一个单元 / 单条自身超目标）则放弃本轮，返回 giveup。
+     *   （#163 后历史层全量渲染，只收紧请求预算不会让请求变短 —— 那样重发与失败请求逐字节相同。）
      * - 图片下载失败（invalid_request：QQ 图床直链过期等）：把这些图片标记为不可用并降级为文本标签后重发，返回 retry；
      * - 配置触发的类别（默认 balance）：自动切换 chat 备用模型并持久化（可选 ctx.notice 通知），返回 retry；
      * - 其余类别 / 动作已用过仍失败：仅记日志，返回 giveup（静默结束本轮，不回复用户）。
@@ -598,9 +599,12 @@ export default class Agent {
         }
 
         // 动作一：上下文超长。
-        // - v2（事件账本）：**快速路径**——只收紧本轮请求预算后直接重发，不做摘要（0 次 LLM）；
-        //   原文永久留在账本，不影响 read_raw/grep_raw 回查，后续轮次照常编译省略。
-        // - 旧回退路径（无事件账本）：保持原样，观察归档后重发。
+        // #163 之后**两条路径统一走"硬切归档 → 重发"**：
+        // 历史层改成全量渲染（REQ-D2-10）后，请求预算不再决定"渲染多少单元"（只喂 `needsArchive`
+        // 观测），所以旧 v2 快速路径"只收紧本轮预算后重发"会让第二次请求与失败的第一次**逐字节
+        // 相同**——必然再次超长，纯空转并白烧一次前缀缓存。现在改成零 LLM 硬切推进
+        // `archivedThrough`（`archiveByTokenIfNeeded` 内部 v2 走 `forceCutBelow`），重发真的会变短；
+        // 原文永久留在账本，read_raw/grep_raw 仍可回查。
         if (e.kind === 'context_too_long' && !handled.archived) {
             if (!ENABLED || !CONTEXT_ARCHIVE_RETRY) return 'giveup';
             // P2-3：把报文里解析出的模型窗口**按模型名持久化**，下次不必再撞一次超长报错
@@ -608,24 +612,16 @@ export default class Agent {
             if (probed !== undefined) rememberProbedContextWindow(modelLabel, probed);
             const target = computeArchiveTarget(Config.context.BUDGET_TOKENS, e.rawText);
             if (target === undefined) return 'giveup';
-            if (session.contextV2) {
-                // 预算收紧只作用于本轮请求；保留强度/标签边界仍按永久预算算。第二次仍超长则 giveup。
-                session.context.setV2BudgetCap(target);
-                handled.archived = true;
-                log.info(`[model-error] 上下文超长：请求预算收紧至 ${target} tokens，直接重发（不做摘要）`);
-                return 'retry';
-            }
-            // 旧回退路径保持原样。
-            // 必须检查返回值：'failed' 表示并未真正收敛（summarize 失败/分片写入失败），
+            // 必须检查返回值：'failed' 表示并未真正收敛（只剩一个单元 / 单条自身超目标），
             // 此时不能标记 handled.archived（否则日志谎报成功、重试再失败就直接放弃）；
             // 'busy' 表示已有归档在飞，允许重发一次（重试会用归档后的上下文重建请求）。
             const outcome = await session.context.archiveByTokenIfNeeded(target);
             if (outcome === 'failed') {
-                log.warning(`[ctx-cost] 归档未完成（目标 ${target} tokens），本轮不重发`);
+                log.warning(`[ctx-cost] 上下文超长：硬切归档未能收敛到 ${target} tokens，本轮不重发（下一轮继续收敛）`);
                 return 'giveup';
             }
             handled.archived = true;
-            log.info(`[model-error] 上下文超长：已观察归档至 ${target} tokens（${outcome}），自动重发`);
+            log.info(`[model-error] 上下文超长：已硬切归档至 ${target} tokens（${outcome}，不做摘要），自动重发`);
             return 'retry';
         }
 

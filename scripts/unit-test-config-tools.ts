@@ -459,14 +459,20 @@ export const tests: Record<string, () => void | Promise<void>> = {
 ,
 
     /**
-     * handleModelError 动作一（v2 快速路径）：事件账本存在时 context_too_long **只收紧本轮请求预算**后重发，
-     * 不做摘要/不走旧归档（0 次 LLM）；同一 run 第二次同错误 giveup，不重复收紧。
+     * handleModelError 动作一（context_too_long）：**v2 与旧路径统一走硬切归档 → 重发**。
+     *
+     * 为什么不再"只收紧预算"：#163 后历史层全量渲染，请求预算只喂 `needsArchive` 观测，
+     * 收紧预算⇒第二次请求与第一次逐字节相同⇒必然再次超长（纯空转 + 白烧缓存）。
+     * 硬切会真的推进 `archivedThrough`，重发才真的变短。
+     * 同一 run 第二次同错误 giveup，不重复归档。
      */
     async testHandleModelErrorContextTooLongV2FastPath(): Promise<void> {
         const agent: any = Object.create(Agent.prototype);
         const ctx: any = { notice: () => undefined };
         const caps: Array<number | null> = [];
         let archiveCalls = 0;
+        let archiveTargets: number[] = [];
+        let archiveOutcome: 'converged' | 'busy' | 'failed' = 'converged';
         let summaryCalls = 0;
         const contextV2: any = {
             head: () => { summaryCalls++; return { unsummarizedTokens: 0 }; },
@@ -478,7 +484,11 @@ export const tests: Record<string, () => void | Promise<void>> = {
         const session: any = {
             context: {
                 setV2BudgetCap: (t: number | null) => { caps.push(t); },
-                archiveByTokenIfNeeded: async () => { archiveCalls++; return 'converged'; },
+                archiveByTokenIfNeeded: async (t?: number) => {
+                    archiveCalls++;
+                    if (typeof t === 'number') archiveTargets.push(t);
+                    return archiveOutcome;
+                },
             },
             contextV2,
         };
@@ -497,23 +507,30 @@ export const tests: Record<string, () => void | Promise<void>> = {
             const expected = Math.floor(128000 * 0.8);
             const handled = { archived: false, switched: false };
             const action = await agent.handleModelError(ctx, session, err, handled);
-            assert.equal(action, 'retry', 'v2 路径应收紧预算后直接重发');
-            assert.deepEqual(caps, [expected], '只调用 setV2BudgetCap(target)，目标=min(本地预算,报文窗口)×0.8');
+            assert.equal(action, 'retry', '应收敛后重发');
+            assert.deepEqual(archiveTargets, [expected], '必须用 目标=min(本地预算,报文窗口)×0.8 走硬切归档');
             assert.equal(handled.archived, true);
-            assert.equal(archiveCalls, 0, 'v2 路径不得走旧 archiveByTokenIfNeeded');
-            assert.equal(summaryCalls, 0, 'v2 快速路径不得触发摘要（0 次 LLM / 不读 head/lastCompile/compact）');
+            assert.deepEqual(caps, [], '不得只收紧预算（那只改 needsArchive 观测，重发与上次逐字节相同）');
+            assert.equal(summaryCalls, 0, '硬切路径不得触发摘要（0 次 LLM / 不读 head/lastCompile/compact）');
 
-            // 同 run 再次同错误：已 archived → giveup，不再收紧预算
+            // 同 run 再次同错误：已 archived → giveup，不再归档
             const action2 = await agent.handleModelError(ctx, session, err, handled);
             assert.equal(action2, 'giveup');
-            assert.equal(caps.length, 1, '第二次不应重复收紧');
+            assert.equal(archiveCalls, 1, '第二次不应重复归档');
 
-            // 开关关闭 → giveup 且不收紧预算
+            // 切不动（failed）→ giveup，且不谎报 archived
+            const handledFail = { archived: false, switched: false };
+            archiveOutcome = 'failed';
+            assert.equal(await agent.handleModelError(ctx, session, err, handledFail), 'giveup');
+            assert.equal(handledFail.archived, false, '未收敛时不得标记 archived（否则日志谎报成功）');
+
+            // 开关关闭 → giveup 且不做任何归档
+            const before = archiveCalls;
             TC.boolConfigs['上下文超长自动归档重试'] = false;
             resetConfigCache();
             const handled2 = { archived: false, switched: false };
             assert.equal(await agent.handleModelError(ctx, session, err, handled2), 'giveup');
-            assert.equal(caps.length, 1, '开关关闭时不应收紧预算');
+            assert.equal(archiveCalls, before, '开关关闭时不应归档');
             assert.equal(handled2.archived, false);
         } finally {
             if (origEnabled === undefined) delete TC.boolConfigs['启用报错自动处理']; else TC.boolConfigs['启用报错自动处理'] = origEnabled;

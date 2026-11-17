@@ -10,9 +10,12 @@
 //
 // 三条硬约束（用户明令 + 缓存不变量）：
 // 1. **禁止跳注**：预算不足不是跳过理由。只有"内容全部已在活动块里"（dup/dup-text）才不写块，
-//    这不叫跳注。真正的跳注计数 `injectionsSkipped` 恒为 0。
-// 2. **先归档后写块**：归档把 `archivedThrough` 推过 `afterSeq` 会让新块立刻被释放（等于没注入），
-//    所以 anchor 必须在归档**之后**用新水位重算。
+//    这不叫跳注。`result.skipped` 因此恒为 0（自检位；`.ai ctx` 不再展示恒 0 的「跳过」，
+//    改展示实测的「已释放 N 块」）。
+// 2. **先归档后写块**：归档把 `archivedThrough` 推上去之后，锚点必须 ≥ 新水位
+//    （`clampAnchor` 也强制这个下界）—— 锚在水位**以内**的块会落进隐藏区、渲染不出来（等于没注入）。
+//    所以 anchor 必须在归档**之后**用新水位重算。注意"水位 == 锚点"是合法且必然的边界
+//    （`isReleased` 用严格小于），早期把它当"已释放"是 #163 的 P0 缺陷。
 // 3. **绝不删除已写入的块**：没有 `deleteEvent/removeInjection/truncateInjections` 路径；
 //    "消失"只能是归档释放（水位越过）或 redact 失效 —— 两者本身就是白名单 rebase。
 import {
@@ -232,8 +235,18 @@ export function coldStartCap(activeTokens: number, perTurn: number = INJECT_PER_
     return Math.max(perTurn, Math.min(INJECT_COLD_START_MAX_TOKENS, perTurn * 4));
 }
 
-/** 外部插件块字符上限：逐条截断到整块 ≤ 2000 字符（不劈条目、不改条目哈希以外的语义） */
-function clampExtensionDraft(draft: InjectionWriteDraft): InjectionWriteDraft {
+/**
+ * 外部插件块字符上限：逐条截断到整块 ≤ 2000 字符（不劈条目、不改条目哈希以外的语义）。
+ *
+ * 截断后**必须重算 `tokens`**：`classifyDrafts`/`clampToPerTurnBudget` 都是按截断**前**正文算的，
+ * 这里不重算会让 `draft.tokens` 偏大（最大 2000 字符级的偏差）⇒ 预算闸偏保守、
+ * `InjectionWriteResult.tokens` 统计虚高（与块里实际正文不符）。
+ * `estimateTokens` 由调用方传入（本文件不 import token 估算，保持依赖方向）。
+ */
+function clampExtensionDraft(
+    draft: InjectionWriteDraft,
+    estimateTokens: (text: string) => number,
+): InjectionWriteDraft {
     if (!draft.extension) return draft;
     let used = 0;
     const items: InjectionItem[] = [];
@@ -247,7 +260,9 @@ function clampExtensionDraft(draft: InjectionWriteDraft): InjectionWriteDraft {
         if (draft.verdicts && draft.verdicts[i]) verdicts.push(draft.verdicts[i]);
         used += text.length;
     }
-    return { ...draft, items, verdicts: verdicts.length === items.length ? verdicts : undefined };
+    let tokens = INJECTION_WRAP_TOKENS;
+    for (const item of items) tokens += Math.max(1, estimateTokens(item.text));
+    return { ...draft, items, tokens, verdicts: verdicts.length === items.length ? verdicts : undefined };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +286,7 @@ export function createInjectionPlanHooks(deps: InjectionWriteDeps): InjectionPla
                 coldStartCap(activeTokens),
                 deps.estimateTokens,
             );
-            return capped.map(clampExtensionDraft);
+            return capped.map(draft => clampExtensionDraft(draft, deps.estimateTokens));
         },
 
         async ensureBudget(_kind: string, tokens: number, budget: InjectionWriteBudget): Promise<boolean> {

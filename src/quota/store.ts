@@ -66,7 +66,12 @@ function isDimEntry(value: unknown): value is DimEntry {
     return isCounter(e.h) && isCounter(e.w) && isCounter(e.m) && typeof e.seen === 'number';
 }
 
-/** 结构校验：任何字段缺失/类型不符都返回 null（交给调用方重建，避免读到半坏数据后 NaN 传染） */
+/**
+ * 结构校验：整体坏（JSON 错 / `version` 不符 / `total.h` 不是合法计数器）⇒ 返回 null，交给调用方重建。
+ *
+ * 单个维度条目的损坏**不**触发整库重置（宽容策略）：`sessions`/`users`/`purposes` 里校验失败的
+ * 条目直接跳过，其余照常读入 —— 一条脏记录不该让所有会话的用量归零。
+ */
 function reviveStore(text: string, now: number): QuotaStore | null {
     let parsed: unknown;
     try {

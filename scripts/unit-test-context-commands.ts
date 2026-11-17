@@ -76,6 +76,10 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(result.text.includes('自动摘要：'), false, '归档可重复后不再展示一次性额度');
         assert.ok(result.text.includes('超预算内容：不注入请求，原文永久保留'), 'status 应说明归档/回查语义');
         assert.ok(result.text.includes('read_raw/grep_raw'));
+        // 「注入」行：第三段是**实测**的已释放块数（归档水位越过锚点后不再渲染）。
+        // 曾经的「跳过 N」是个生产代码从不赋值的字段，恒 0，看板失去诊断价值 —— 这里锁死新口径。
+        assert.ok(/注入：活动 \d+ 块 \/ \d+ token \/ 已释放 \d+ 块/.test(result.text), result.text);
+        assert.equal(result.text.includes('跳过'), false, '不应再出现恒 0 的「跳过」占位');
         assert.equal(result.text.includes('自动评分'), false, 'judge 未触发时不显示评分行');
 
         // judge 计数 > 0 时展示自动评分

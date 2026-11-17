@@ -5,6 +5,7 @@ import { ConversationEvent, Part } from '../src/context/events';
 import { createEmptyHead } from '../src/context/head';
 import { ContextSnapshot } from '../src/context/store';
 import { compileRequest, CompiledMessage } from '../src/context/view/compile';
+import { INJECTION_WRAP_TOKENS } from '../src/context/injections';
 import { sliceAtAnchor } from '../src/context/view/units';
 import { truncateToTokenBudget } from '../src/utils/token_budget';
 import { estimateEventTokens as estimateEventTokensReal, estimateTextTokens as estimateTextTokensReal } from '../src/utils/token_estimate';
@@ -65,6 +66,28 @@ function toolResult(seq: number, turnId: string, groupId: string, callId: string
         callId,
         name,
         parts: [{ type: 'text', text: '晴，25度' }],
+    };
+}
+
+function injectionBlock(seq: number, kind: string, afterSeq: number, text: string): ConversationEvent {
+    return {
+        seq,
+        eventId: `inj:${kind}:${seq}`,
+        at: seq,
+        recvAt: seq,
+        kind: 'event',
+        systemName: `inject-${kind}`,
+        raw: {
+            injection: {
+                v: 1,
+                kind,
+                afterSeq,
+                tokens: text.length + INJECTION_WRAP_TOKENS,
+                items: [{ k: `${kind}|${seq}`, r: 1, h: 1, text }],
+                createdAt: seq,
+            },
+        },
+        parts: [{ type: 'text', text }],
     };
 }
 
@@ -612,6 +635,46 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.ok(text.includes('four') && text.includes('five'));
         assert.equal(result.stats.summaryBoundarySeq, 1);
         assert.equal(result.stats.gapInjected, true, '摘要边界与归档边界之间的未总结区间必须有缺口提示');
+    },
+
+    /**
+     * #163 P0 回归：注入块锚点**等于**释放水位时必须照常渲染。
+     *
+     * 这是真实链路里必然出现的边界：预算闸先把水位推上去、writer 再按新水位取锚点
+     * （`anchor = max(lastSentSeq, archivedThrough)`，`clampAnchor` 的下界也是它）。
+     * 旧实现 `isReleased` 用 `afterSeq <= 水位` ⇒ 这类块当轮即判"已释放"，模型看不到。
+     */
+    testCompileRendersInjectionBlockAtWatermark() {
+        const events = [
+            userEvent(1, '一'),
+            assistantEvent(2, '二'),
+            injectionBlock(3, 'memory', 2, '喜欢猫'),
+            userEvent(4, '四'),
+        ];
+        const snap: ContextSnapshot = {
+            ...snapshot(events),
+            head: { ...HEAD, archivedThrough: 2, nextSeq: 5 },
+        };
+        const result = compileRequest({ ...baseOptions, snapshot: snap, budgetTokens: 1000 });
+        assert.equal(result.stats.injectionBlocks, 1, '锚点 == 水位（2）的块必须计入活动块');
+        assert.ok(textOf(result.messages).includes('喜欢猫'), '块正文必须出现在请求体里');
+        assert.ok(result.stats.injectionTokens > 0, '活动注入 token 必须计入预算');
+    },
+
+    /**
+     * #163 P0 回归：新会话/刚重载后的首轮（锚点 0、水位 0）注入块必须渲染。
+     *
+     * 真实链路：用户消息先入库占 seq 1，`injectionAnchorSeq` 初值 0 ⇒ `afterSeq = 0`；
+     * 旧实现 `isReleased(0, 0)` 为真 ⇒ 首轮注入全部丢失。
+     */
+    testCompileRendersInjectionBlockOnFirstRound() {
+        const events = [
+            userEvent(1, '你好'),
+            injectionBlock(2, 'time', 0, '现在 12:00'),
+        ];
+        const result = compileRequest({ ...baseOptions, snapshot: snapshot(events), budgetTokens: 1000 });
+        assert.equal(result.stats.injectionBlocks, 1, 'anchor=0 / 水位 0 ⇒ 首轮块必须活动');
+        assert.ok(textOf(result.messages).includes('现在 12:00'), '首轮注入正文必须渲染');
     },
 
     // ---- #163 D2 新增：前缀稳定性核心行为 ----

@@ -48,6 +48,7 @@ import {
 } from '../src/context/injection_writer';
 import type { InjectionWriteDeps } from '../src/context/injection_writer';
 import { INJECT_COLD_START_MAX_TOKENS, INJECT_PER_TURN_MAX_TOKENS } from '../src/utils/context_limits';
+import { estimateTextTokens } from '../src/utils/token_estimate';
 import { makeItem } from '../src/prompt/injections/keys';
 
 class FakeStorage {
@@ -152,8 +153,9 @@ function makeWriterHarness(opts: { T: number; L: number; archiveAdvances: number
     const service = ContextService.openSync(`QQ-Group:inject-writer-${sidCounter}`, {
         estimateEventTokens: () => 10,
     });
-    // 必须让 `head.nextSeq > 1`：空会话里 `clampAnchor(0, 1, 0)` 会得到 afterSeq=0，
-    // 而 `releaseBoundaryOf` 也是 0 ⇒ `isReleased(0, 0)` 为真，块立刻"已释放"（纯退化场景）。
+    // 必须让 `head.nextSeq > 1`，否则 `clampAnchor(0, 1, 0)` 得到 afterSeq=0 —— 这本身是合法锚点
+    // （`isReleased` 用严格小于，水位 0 时 afterSeq=0 仍是活动块），但与真实链路（首轮前用户消息
+    // 已占 seq 1..n）不符，会让"锚点位置"这类断言失去意义。种入事件以贴近真机。
     const seed = Math.max(2, opts.archiveAdvances + 2);
     const events: EventInput[] = [];
     for (let i = 1; i <= seed; i++) {
@@ -393,9 +395,29 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(releaseBoundaryOf(null), 0);
         assert.equal(releaseBoundaryOf({ summarizedThrough: -1, archivedThrough: Number.NaN }), 0, '脏值收敛到 0');
         const meta = metaOf('time', 5, [item('time:5', 'x')]);
-        assert.equal(isReleased(meta, 5), true, 'afterSeq <= 水位 ⇒ 已释放');
+        assert.equal(isReleased(meta, 5), false, '水位 == afterSeq ⇒ 块仍在可见区最前面，不算释放');
+        assert.equal(isReleased(meta, 6), true, '水位严格越过 afterSeq ⇒ 已释放');
         assert.equal(isReleased(meta, 4), false);
         assert.equal(isReleased(meta, Number.NaN), false, '脏水位按 0 处理');
+    },
+
+    /**
+     * P0 回归（#163）：两个必现的"注入写完即丢失"入口。
+     *
+     * ① 预算闸归档后 `anchor == archivedThrough == 水位` ⇒ 旧 `<=` 判定会让本轮新块立刻释放；
+     * ② 新会话/每次重载首轮 `injectionAnchorSeq = 0` + 水位 0 ⇒ 旧 `isReleased(0, 0)` 为真。
+     *
+     * 两者都是"`afterSeq` 落在水位**上**而不是**内**"的边界值，`isReleased` 必须用严格小于。
+     */
+    testInjectionReleasedIsStrictlyLessThanBoundary() {
+        // ① 归档把水位推到 anchor 上（真实 writer 的必然结果：clampAnchor 的下界就是 archivedThrough）
+        const atWatermark = metaOf('memory', 7, [item('mem|1', 'x')]);
+        assert.equal(isReleased(atWatermark, 7), false, 'anchor 恰等于水位 ⇒ 未释放（本轮必须渲染）');
+        // ② 空会话首轮：anchor 与水位同为 0
+        const atZero = metaOf('memory', 0, [item('mem|1', 'x')]);
+        assert.equal(isReleased(atZero, 0), false, '首轮 anchor=0/水位=0 ⇒ 未释放（旧实现首轮必丢）');
+        // 水位推进一格才释放
+        assert.equal(isReleased(atZero, 1), true, '水位 1 越过 anchor 0 ⇒ 释放');
     },
 
     // -----------------------------------------------------------------------
@@ -449,7 +471,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(key.boundary, 3, '水位向下取整');
     },
 
-    /** T11-4：`releasedInjectTokens` 只算"本轮由活动变释放"的块 */
+    /** T11-4：`releasedInjectTokens` 只算"本轮由活动变释放"的块（区间与 `isReleased` 同口径） */
     testInjectionReleasedTokensOnlyCountsCrossedBlocks() {
         const events = [
             injectionEvent(2, 'memory', 2, [item('a', 'x'.repeat(10))]),
@@ -462,7 +484,15 @@ export const tests: Record<string, () => void | Promise<void>> = {
             second.tokens,
             '水位 4→8 只跨过 afterSeq=5 的块（afterSeq=2 早就释放、afterSeq=9 还没）',
         );
-        assert.equal(releasedInjectTokens(events, 0, 2), injectionOf(events[0])!.tokens, '0→2 跨过第 1 块');
+        assert.equal(releasedInjectTokens(events, 0, 3), injectionOf(events[0])!.tokens, '0→3 跨过第 1 块');
+        // 边界：水位停在块锚点上不算"跨过"（与 `isReleased` 的严格小于一致）
+        assert.equal(releasedInjectTokens(events, 0, 2), 0, '水位 0→2 只到 anchor=2 ⇒ 未释放，不扣减');
+        assert.equal(
+            releasedInjectTokens(events, 2, 5),
+            injectionOf(events[0])!.tokens,
+            '水位 2→5：anchor=2 的块由活动变释放（2 < 5），anchor=5 的块仍活动（5 !< 5）',
+        );
+        assert.equal(releasedInjectTokens(events, 5, 6), second.tokens, '水位 5→6 越过 anchor=5 ⇒ 扣减');
         assert.equal(releasedInjectTokens(events, 8, 8), 0, '水位没动 ⇒ 0');
         assert.equal(releasedInjectTokens(events, 8, 4), 0, '反向区间 ⇒ 0（不返回负数）');
     },
@@ -480,12 +510,17 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(
             activeInjectTokens(events as any, { summarizedThrough: 0, archivedThrough: 4 }),
             injectionOf(events[1])!.tokens,
-            '水位 4 ⇒ afterSeq=2 的块已释放（<= 水位），afterSeq=5 的仍活动',
+            '水位 4 越过 afterSeq=2 的块（2 < 4 ⇒ 已释放），afterSeq=5 的仍活动',
         );
         assert.equal(
             activeInjectTokens(events as any, { summarizedThrough: 0, archivedThrough: 5 }),
+            injectionOf(events[1])!.tokens,
+            '水位 5 恰停在 afterSeq=5 上 ⇒ 仍活动（`isReleased` 是严格小于）',
+        );
+        assert.equal(
+            activeInjectTokens(events as any, { summarizedThrough: 0, archivedThrough: 6 }),
             0,
-            '水位 5 ⇒ afterSeq=5 也算已释放（`isReleased` 是 <=）',
+            '水位 6 越过 afterSeq=5 ⇒ 全部释放',
         );
         assert.equal(activeInjectTokens(events as any, { summarizedThrough: 9, archivedThrough: 9 }), 0);
         resetInjectionTokenCache();
@@ -585,8 +620,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     async testInjectionWriterAllDupWritesNothing() {
         const h = makeWriterHarness({ T: 0, L: 10000, archiveAdvances: 0 });
         const it = item('mem|1', '喜欢猫');
-        // afterSeq 必须 ≥ 1：`isReleased` 是 `afterSeq <= 水位`，而水位为 0 时 afterSeq=0 会被
-        // 判为"已释放"（真实链路里 anchor 恒 ≥ 1，因为种子事件已占 seq 1..n）
+        // 种子块锚在 1（真实链路：用户消息先入库占 seq 1..n，anchor 恒 ≥ 1）
         h.service.appendInjection({ kind: 'memory', afterSeq: 1, items: [it] });
         const before = h.service.snapshot().events.length;
         const result = await writeInjectionBlocks({
@@ -638,6 +672,66 @@ export const tests: Record<string, () => void | Promise<void>> = {
             budget: room.budget,
         });
         assert.equal(room.beforeRequestCalls(), 0, '装得下 ⇒ 不归档');
+    },
+
+    /**
+     * T9-1b（P0 回归）：**本路由真实入口**——归档闸把水位推到新块锚点之后，块必须仍**活动**。
+     *
+     * 旧实现 `isReleased` 用 `afterSeq <= 水位`，而归档后 `anchor == archivedThrough == 水位`
+     * 恒成立 ⇒ 本轮刚写的块当轮即判"已释放"，模型看不到（等于静默跳注，违反 REQ-D3-28）。
+     */
+    async testInjectionWriterBlockSurvivesArchiveGate() {
+        const h = makeWriterHarness({ T: 990, L: 1000, archiveAdvances: 5 });
+        await writeInjectionBlocks({
+            deps: h.deps,
+            drafts: [{ kind: 'memory', items: [item('mem|1', '新记忆')] }],
+            lastSentSeq: 1,
+            budget: h.budget,
+        });
+        const snap = h.service.snapshot();
+        const boundary = releaseBoundaryOf(snap.head);
+        const split = splitInjections(snap.events, boundary);
+        assert.equal(split.released.length, 0, '归档闸新写的块不得在当轮被判已释放');
+        assert.equal(split.injections.length, 1, '当轮必须有一个可渲染的注入块');
+        assert.equal(split.injections[0].meta.afterSeq, 5, '锚点 = 归档后的新水位');
+        assert.equal(boundary, 5, '水位与新块锚点相等（这正是旧实现翻车的边界）');
+    },
+
+    /**
+     * T9-1c（P0 回归）：新会话／刚重载后的第一轮（`injectionAnchorSeq = 0`、水位 0）。
+     *
+     * `clampAnchor(0, nextSeq, 0)` 得到 `afterSeq = 0`；旧实现 `isReleased(0, 0)` 为真 ⇒
+     * 首轮注入全部丢失，要等第二轮 `re-inject` 才补上（模型少看一轮记忆/时间）。
+     */
+    async testInjectionWriterFirstRoundAfterReloadRenders() {
+        installHost();
+        sidCounter += 1;
+        const service = ContextService.openSync(`QQ-Group:inject-first-round-${sidCounter}`, {
+            estimateEventTokens: () => 10,
+        });
+        // 真机顺序：用户消息先入库（seq=1），随后才规划注入；此时 anchor 仍是 0
+        service.getStore().append([
+            { kind: 'user', uid: 'QQ:1', msgId: 'f1', parts: [{ type: 'text', text: '你好' }] } as EventInput,
+        ]);
+        const deps: InjectionWriteDeps = {
+            service,
+            archive: { estimateT: () => 0, beforeRequest: () => { /* 无归档器 */ } },
+            estimateTokens: (text: string) => text.length,
+            computeL: () => 1000,
+        };
+        const result = await writeInjectionBlocks({
+            deps,
+            drafts: [{ kind: 'memory', items: [item('mem|1', '用户喜欢猫')] }],
+            lastSentSeq: 0,                                  // 新会话 / 刚重载
+            budget: { prefixTokens: 0, toolsReserveTokens: 0, permanentBudget: 1000, retainPercent: 30 },
+        });
+        assert.equal(result.blocks, 1, '首轮必须写块');
+        const snap = service.snapshot();
+        const boundary = releaseBoundaryOf(snap.head);
+        const split = splitInjections(snap.events, boundary);
+        assert.equal(boundary, 0, '首轮水位仍是 0');
+        assert.equal(split.injections.length, 1, '首轮块必须活动（旧实现这里恒为 0 ⇒ 首轮丢注入）');
+        assert.equal(split.released.length, 0);
     },
 
     /**
@@ -721,7 +815,7 @@ export const tests: Record<string, () => void | Promise<void>> = {
     /** 单条自身超上限：仍只留一条，但正文被截到上限（不丢弃、不劈成两条） */
     async testInjectionWriterClampsSingleOversizeExtensionItem() {
         const h = makeWriterHarness({ T: 0, L: 100000, archiveAdvances: 0 });
-        await writeInjectionBlocks({
+        const result = await writeInjectionBlocks({
             deps: h.deps,
             drafts: [{
                 kind: 'ext:plug:huge',
@@ -735,6 +829,24 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(blocks.length, 1);
         assert.equal(blocks[0]!.items.length, 1);
         assert.equal(blocks[0]!.items[0].text.length, EXTENSION_INJECTION_MAX_CHARS);
+        // 截断后 tokens 必须按**截断后**正文重算（否则预算闸偏保守 + 结果统计虚高）。
+        // 注意两套口径：写入块里的 `meta.tokens` 由 `service.appendInjection` 用生产估算器算，
+        // 而 `InjectionWriteResult.tokens` 沿用 harness 注入的 `deps.estimateTokens`（此处 = 字符数）。
+        const capped = 'a'.repeat(EXTENSION_INJECTION_MAX_CHARS);
+        assert.equal(
+            blocks[0]!.tokens,
+            INJECTION_WRAP_TOKENS + estimateTextTokens(capped),
+            '块内 tokens 必须与截断后正文一致（生产估算口径）',
+        );
+        assert.equal(
+            result.tokens,
+            INJECTION_WRAP_TOKENS + h.deps.estimateTokens(capped),
+            `InjectionWriteResult.tokens 必须按截断后正文重算（${result.tokens} != ${INJECTION_WRAP_TOKENS + h.deps.estimateTokens(capped)}）`,
+        );
+        assert.ok(
+            result.tokens < INJECTION_WRAP_TOKENS + h.deps.estimateTokens('a'.repeat(3000)),
+            '未截断的 token 数不得被沿用',
+        );
     },
 
     /** 空 draft / 空 items ⇒ 零成本直接返回（不碰 snapshot） */

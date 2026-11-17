@@ -50,8 +50,6 @@ export interface CtxSessionLike {
     prefixProbe?: { count: number; hashes: string[]; throughSeq: number; firstDiffIndex: number | null };
     /** 每会话缓存命中率窗口（#163 REQ-D9-03） */
     cacheWindow?: CacheWindowLike;
-    /** 本轮注入被跳过的条目数（#163 REQ-D3；当前实现恒为 0，保留展示口径） */
-    injectionsSkipped?: number;
 }
 
 const HIDE_TARGETS: readonly HideTarget[] = ['user', 'assistant', 'all'];
@@ -182,7 +180,11 @@ export function formatCtxStatus(input: CtxCommandInput): string {
         : '前缀：稳定');
     const blocks = input.archive?.blocks ?? [];
     const activeBlocks = blocks.filter(b => b.state === 'active').length;
-    lines.push(`注入：活动 ${activeBlocks} 块 / ${Math.max(0, input.archive?.activeInjectTokens ?? 0)} token / 跳过 ${input.session?.injectionsSkipped ?? 0}`);
+    const releasedBlocks = blocks.filter(b => b.state === 'released').length;
+    // 「已释放」是**实测**值（归档水位越过块锚点后它不再渲染），不是恒 0 的占位符：
+    // 早期这里显示「跳过 0」，而那个字段生产代码从不赋值 —— 在"块写完即释放"的缺陷下
+    // 用户看到「活动 0 块 / 跳过 0」无法判断是本轮无需注入，还是注入了但丢了。
+    lines.push(`注入：活动 ${activeBlocks} 块 / ${Math.max(0, input.archive?.activeInjectTokens ?? 0)} token / 已释放 ${releasedBlocks} 块`);
     const compiled = input.service.lastCompile();
     if (!compiled) {
         // 无统计 ≠ 校验通过：重载后编译统计为空，谎报"通过"会掩盖问题
@@ -203,10 +205,13 @@ export function formatCtxStatus(input: CtxCommandInput): string {
         lines.push('归档：暂无');
     }
     if (stats.deletedThrough > 0) {
-        lines.push(`已清理原文：seq ≤ e:${stats.deletedThrough} 的原文页已物理清除（归档保留原文=关），不可检索`);
+        lines.push(`已清理原文：seq ≤ e:${stats.deletedThrough} 的原文页已物理清除（归档保留原文=关），该水位之后仍可 read_raw/grep_raw 回查`);
     }
     lines.push(stats.summarizedThrough > 0 ? '更早内容：已整理为摘要（原文仍可回查）' : '更早内容：暂未整理');
-    lines.push(`超预算内容：不注入请求，原文永久保留；可用 read_raw/grep_raw 回查（展示上限约 ${budgets.retainPercent + 100}% 预算）`);
+    // v7 双水位下没有"按预算选一部分历史渲染"这回事（#163 REQ-D2-10 全量渲染）：
+    // 可见历史要么全部渲染、要么被归档水位隐藏。「超预算」只表现为 needsArchive 触发的归档，
+    // 因此这里不再给 `retainPercent + 100` 这种旧「标签边界」口径的百分比（没有对应语义）。
+    lines.push('超预算内容：不注入请求，原文永久保留；可用 read_raw/grep_raw 回查');
     const judgeCount = input.session?.ctxStats?.judge;
     if (typeof judgeCount === 'number' && judgeCount > 0) lines.push(`自动评分：本会话已触发 ${judgeCount} 次`);
     if (input.archive?.lastReason) {

@@ -241,10 +241,12 @@ export async function planAndWriteInjections(input: InjectionPlanInput): Promise
     const controller = archiveControllerFor(session);
     // 兜底端口：控制器不可用时（未接入事件账本的异常路径）按"T=0、不归档"处理，
     // writer 只会走"装得下"分支，绝不因为拿不到归档器而不注入。
+    // 必须留一条观测：否则"水位永不推进 ⇒ 注入块写完即被下一轮判释放"的现场无线索可查。
     const archive: InjectionArchivePort = controller ?? {
         estimateT: () => 0,
         beforeRequest: () => { /* 无归档器可调 */ },
     };
+    if (!controller) session.notePrefixObservation('injection-archive-port-missing', { sessionId: String(session.sessionId || '') });
     const deps: InjectionWriteDeps = {
         service,
         archive,

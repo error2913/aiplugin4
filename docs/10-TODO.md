@@ -15,9 +15,8 @@
 | 协议版本协商 | `initialize` 硬编码 `protocolVersion: 2025-11-25` | 根据服务器返回的 `protocolVersion` 做能力协商与降级，支持服务器偏好版本 |
 | 流式工具结果 | `tools/call` 只解析非流式 JSON / 单帧 SSE | 解析流式 SSE 返回的多个 `content` 块（文本/资源/图片），按顺序拼接；处理 `progress` 通知 |
 | 无状态模式 | 会话按 AI 会话分桶、LRU/TTL 回收已实现；未支持服务器声明 `stateless` 时跳过会话头 | 支持无状态模式（服务器声明 `stateless` 时不再发送/依赖会话头） |
-| Resources/Prompts | 只注册 `tools/list` 返回的工具 | 按需暴露 `resources/list`、`prompts/list`，注册为只读工具或注入上下文 |
 
-已实现（勿再列为待办）：工具列表 60s TTL 缓存 + refresh 强制重拉、工具下线清理、会话按 AI 会话分桶 + 空闲/上限 LRU 回收、`mcp-browser` 回收前自动 `browser_close`、配置改动后按服务器名重建会话。
+已实现（勿再列为待办）：工具列表 60s TTL 缓存 + refresh 强制重拉、工具下线清理、会话按 AI 会话分桶 + 空闲/上限 LRU 回收、`mcp-browser` 回收前自动 `browser_close`、配置改动后按服务器名重建会话、`resources/list` + `resources/read`（`mcp_list_resources`/`mcp_read_resource` 工具按需读取，不进 system prompt）、`prompts/list` + `prompts/get`（`.ai mcp prompt list|get` 手动触发，不自动注入）。
 
 ## 未接线的配置（已注册但无消费点）
 
@@ -56,3 +55,11 @@
 - **余温预热缓存**：实现时判定无收益，不做。
 - **`reply()` 每工具轮延迟写盘（B4）**：放弃——回复是关键路径，延迟写会丢 assistant 记录；且窗口移出已让 `session_<id>` 体积有上界。
 - 原文库**只对「归档/窗口移出」写分片**，不做「每条消息一个 key」的全量原文库。
+
+## 上下文成本治理：#163 已知残留（不阻塞发布，按需排期）
+
+| 项 | 现状 | 待办 |
+| --- | --- | --- |
+| 同 anchor 跨轮合并改写已发送消息 | `mergeInjectionMessages`（`src/context/view/compile.ts:765`）把**同 slot** 的多个注入块合并成一条消息。若连续两轮 anchor 相同（例如"可见单元为空 ⇒ `lastSelectedSeq=0` 被夹紧到 `archivedThrough`"），第 2 轮的块会被合并进第 1 轮那条**已发送**消息 ⇒ `stats.prefixDrift` 报点、缓存前缀从该点起失效；冻结守卫按设计不覆盖增量区。不丢内容、不改语义，只损缓存命中 | 把「同 anchor 连续两轮不得合并已发送消息」写成不变量检查；或让 writer 在 `anchor <= 上次 anchor` 时按 `anchor = lastSentSeq` 单调递增 |
+| `activeInjectTokens` 的单槽 memo 命中率低 | memo 键是「events 数组身份 + 水位」，但 `ContextStore.snapshot()` 每次 `events.slice()` 返回新数组 ⇒ 生产调用方（`compile.ts` / `archive_controller.ts` / `injection_writer.ts`）逐次 miss，实际只在单轮内重复问时生效 | 换成与数组身份无关的稳定键（「块数 + 最大 seq + 水位」，与 `activeIndexFor` 同款），否则这层 O(n) 重扫优化等于没做 |
+| `Setting.validKeys` 是死代码 | `src/session/setting.ts` 的 `validKeys` 静态数组无人读取（revive 实际走 `validKeysMap`） | 删除或在 revive 里显式使用；改 `Setting` 字段时不要以为要同步它 |

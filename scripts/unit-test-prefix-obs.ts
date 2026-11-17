@@ -252,8 +252,8 @@ export const tests: Record<string, () => void | Promise<void>> = {
         assert.equal(takeBootRebaseCause(), 'reload', '同版本同工具 ⇒ 热重载');
 
         resetEnv();
+        initBootRebaseCause('4.30.1', '[]');
         initBootRebaseCause('4.31.0', '[]');
-        initBootRebaseCause('4.32.0', '[]');
         assert.equal(takeBootRebaseCause(), 'upgrade', '版本变化 ⇒ 升级');
 
         resetEnv();

@@ -56,8 +56,49 @@ export type ImageFetchResult =
 // ---- 并发闸门（照 image_host.ts 的形态，模块级） ----
 let activeFetches = 0;
 const fetchWaiters: Array<() => void> = [];
+/**
+ * 超时后底层请求**仍未 settle** 的孤儿数量（观测用；正常情况下恒为 0）。
+ *
+ * 为什么需要这个计数：goja 没有 AbortController（见 `utils/timeout.ts`），`withDeadline`
+ * 超时只让调用方不再等待，Go 侧 HTTP 可能仍在跑并持有 body。若此时立刻归还并发槽位，
+ * `MAX_CONCURRENCY` 就退化成"调用方还在等"的上限，`maxBytes` × 并发 的内存上界不成立。
+ * 因此超时后槽位**交给底层 promise**，它 settle 时才归还（宽限见 `orphanGraceMs`）。
+ */
+let orphanFetches = 0;
+/** 孤儿宽限定时器（生产由定时器自己消费；测试需要能被 `resetFetchSlotsForTest` 清掉） */
+const orphanGraceTimers: any[] = [];
 
-async function withGlobalSlot<T>(fn: () => Promise<T>): Promise<T> {
+/**
+ * 孤儿占槽的宽限上限：底层请求超时后再等这么久仍未 settle ⇒ 强制回收槽位。
+ *
+ * 为什么必须有上限：`fetch` 在极端情况下（TCP 黑洞、Go 侧无超时）可能**永不 settle**，
+ * 只按"settle 才还槽"会让下载能力永久降级到 0 —— 那比短暂的超并发更糟。
+ */
+function orphanGraceMs(timeoutMs: number): number {
+    if (orphanGraceOverrideMs !== null) return orphanGraceOverrideMs;      // 仅测试路径
+    return Math.min(60_000, Math.max(5_000, timeoutMs * 2));
+}
+
+/** 测试用：覆盖孤儿宽限（null = 恢复默认），避免单测真的等 5s */
+let orphanGraceOverrideMs: number | null = null;
+export function setOrphanGraceMsForTest(ms: number | null): void {
+    orphanGraceOverrideMs = ms;
+}
+
+/** 测试用：当前孤儿数（>0 表示有超时后仍在后台跑的下载，槽位未归还） */
+export function orphanFetchCountForTest(): number {
+    return orphanFetches;
+}
+
+/**
+ * 占槽执行 `fn`。
+ *
+ * `fn` 会拿到 `hold(settle, timeoutMs)`：调用它表示"槽位不能随本次返回而释放"，
+ * 改由底层请求 `settle` 或宽限到期时归还。幂等，最多生效一次。
+ */
+async function withGlobalSlot<T>(
+    fn: (hold: (settle: Promise<unknown>, timeoutMs: number) => void) => Promise<T>,
+): Promise<T> {
     if (activeFetches < MAX_CONCURRENCY) {
         activeFetches++;
     } else {
@@ -65,19 +106,56 @@ async function withGlobalSlot<T>(fn: () => Promise<T>): Promise<T> {
         await new Promise<void>(resolve => fetchWaiters.push(resolve));
         activeFetches++;
     }
-    try {
-        return await fn();
-    } finally {
+    let held = false;
+    let released = false;
+    const release = () => {
+        if (released) return;
+        released = true;
         activeFetches = Math.max(0, activeFetches - 1);
         const next = fetchWaiters.shift();
         if (next) next();
+    };
+    const hold = (settle: Promise<unknown>, timeoutMs: number): void => {
+        if (held || released) return;
+        held = true;
+        orphanFetches++;
+        let timer: any = null;
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            if (timer !== null) {
+                try { clearTimeout(timer); } catch (_e) { /* 忽略：清理失败不影响归还 */ }
+                const idx = orphanGraceTimers.indexOf(timer);
+                if (idx !== -1) orphanGraceTimers.splice(idx, 1);
+                timer = null;
+            }
+            orphanFetches = Math.max(0, orphanFetches - 1);
+            release();
+        };
+        timer = setTimeout(() => {
+            log.warning(`图片下载超时后底层请求 ${Math.round(orphanGraceMs(timeoutMs) / 1000)}s 仍未结束，强制回收并发槽位（不再等它）`);
+            finish();
+        }, orphanGraceMs(timeoutMs));
+        orphanGraceTimers.push(timer);
+        Promise.resolve(settle).then(finish, finish);
+    };
+    try {
+        return await fn(hold);
+    } finally {
+        if (!held) release();            // 正常路径立即还槽；已 hold 的由 finish 负责
     }
 }
 
-/** 测试用：清空并发计数 */
+/** 测试用：清空并发计数与孤儿宽限定时器 */
 export function resetFetchSlotsForTest(): void {
     activeFetches = 0;
     fetchWaiters.length = 0;
+    orphanFetches = 0;
+    for (const timer of orphanGraceTimers) {
+        try { clearTimeout(timer); } catch (_e) { /* 忽略：清理失败不影响测试 */ }
+    }
+    orphanGraceTimers.length = 0;
 }
 
 /** base64 解出的字节数（含 padding 修正） */
@@ -240,7 +318,7 @@ export async function fetchImageAsBase64(
     }
 
     // ③ 并发闸门：排队时间不计入超时预算
-    const run = () => withGlobalSlot(async (): Promise<ImageFetchResult> => {
+    const run = () => withGlobalSlot(async (hold): Promise<ImageFetchResult> => {
         const deadline = Date.now() + timeoutMs;
         let hop = url;
         let status = 0;
@@ -252,15 +330,25 @@ export async function fetchImageAsBase64(
             const remain = deadline - Date.now();
             if (remain <= 0) return { ok: false, kind: 'network', permanent: false, error: `图片下载超时（${timeoutMs}ms）` };
             let response: any;
+            // 底层 fetch promise：超时路径要拿它"占住槽位"（见 hold 的注释）
+            let underlying: Promise<unknown> | null = null;
             // ④ fetch 与 btoa 必须分两段：btoa 在 try 之外
             try {
                 response = await withDeadline(
-                    () => fetch(hop, { method: 'GET', headers: { 'Accept': 'image/*,*/*;q=0.8' } }),
+                    () => {
+                        // 记下底层 promise：超时后要靠它把并发槽位"续占"到底层 settle（见下方 hold）
+                        underlying = Promise.resolve(fetch(hop, { method: 'GET', headers: { 'Accept': 'image/*,*/*;q=0.8' } }));
+                        return underlying;
+                    },
                     remain,
                 );
             } catch (e) {
                 const msg = errText(e);
                 const timedOut = (e as any)?.code === 'TIMEOUT';
+                // ★ 超时不等于"下载已结束"（goja 无 AbortController）：底层 Go HTTP 可能仍在跑并
+                //   持有 body。此刻立刻还槽会让 20MB × MAX_CONCURRENCY 的内存上界失效，因此把槽位
+                //   交给底层 promise（settle 或宽限到期才归还）。
+                if (timedOut && underlying) hold(underlying, timeoutMs);
                 return {
                     ok: false,
                     kind: 'network',

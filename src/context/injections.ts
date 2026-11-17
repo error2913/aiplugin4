@@ -127,7 +127,7 @@ export function isInjection(event: InjectionEventLike | null | undefined): boole
  * 释放水位：`max(summarizedThrough, archivedThrough)`
  *（与 `compile.ts` 的 `hiddenBoundarySeq` 同口径）。
  *
- * 只有落在水位**以内**（`afterSeq <= 水位`）的注入块才算已释放：它的文本已经被摘要覆盖，
+ * 只有水位**越过**块锚点（`afterSeq < 水位`）才算已释放：它的文本已经被摘要/归档覆盖，
  * 再渲染就是重复内容；但事件本身不删、不改（append-only）。
  */
 export function releaseBoundaryOf(head: { summarizedThrough?: unknown; archivedThrough?: unknown } | null | undefined): number {
@@ -136,9 +136,28 @@ export function releaseBoundaryOf(head: { summarizedThrough?: unknown; archivedT
     return Math.max(s, a);
 }
 
+/**
+ * 是否已释放：**严格小于**，不是 `<=`（#163 修复 P0）。
+ *
+ * `afterSeq = A` 的语义是"插在 seq ≤ A 的单元之后"。水位推进到正好 `A` 时，
+ * 可见单元从 `A+1` 起 —— 块仍然落在**可见区最前面**（`slot()` 归一到 0 号位），完全有效。
+ * 只有水位 `> A`（`A` 本身也进了隐藏区）时，块的位置才落到不可见部分，渲染它会与
+ * 摘要/归档内容重复。
+ *
+ * 早期用 `<=` 造成两个必现的"注入静默丢失"：
+ * 1. 预算闸归档后 writer 锚到**新水位**（`anchor = max(lastSentSeq, archivedThrough)`，
+ *    且 `clampAnchor` 下界就是 `archivedThrough`）⇒ `A == 水位` 恒成立 ⇒ 本轮新块写完即判释放；
+ * 2. 新会话/每次重载后 `injectionAnchorSeq = 0`、水位也是 0 ⇒ `isReleased(0, 0)` 为真
+ *    ⇒ 首轮注入全部丢失（第二轮 `re-inject` 才补上）。
+ * 回归用例：`unit-test-injection-contract` 的 `testInjectionReleasedIsStrictlyLessThanBoundary` /
+ * `testInjectionWriterBlockSurvivesArchiveGate` / `testInjectionWriterFirstRoundAfterReloadRenders`、
+ * `unit-test-context-compile` 的 `testCompileRendersInjectionBlockAtWatermark` /
+ * `testCompileRendersInjectionBlockOnFirstRound`。
+ */
 export function isReleased(meta: InjectionMeta, releaseBoundary: number): boolean {
-    const boundary = finiteInt(releaseBoundary);
-    return meta.afterSeq <= Math.max(0, boundary ?? 0);
+    const boundary = Math.max(0, finiteInt(releaseBoundary) ?? 0);
+    const anchor = Math.max(0, finiteInt(meta.afterSeq) ?? 0);
+    return anchor < boundary;
 }
 
 /** 锚点夹紧（防御：并发快照/草稿重放/水位连推）；主逻辑是 isReleased */
@@ -191,8 +210,12 @@ export function splitInjections<E extends InjectionEventLike>(
  * 审核修订（AUDIT-002）：初版要求调用方自己算释放水位，导致与 `activeInjectTokens` 口径分裂。
  * 现在 `sumActiveInjectionTokens` 是纯内层函数，对外只暴露 `activeInjectTokens(events, head)`。
  *
- * 审核修订（AUDIT-003）：加单槽 memo（数组身份 + 水位），**绝不用 `store.version`**——
- * `commitArchive` 每次都 `version++`，而绝大多数轮次并没有块被释放 ⇒ 用 version 做键必然失效。
+ * 审核修订（AUDIT-003）：加单槽 memo（数组身份 + 水位）。**已知局限**：`ContextStore.snapshot()`
+ * 每次返回 `events.slice()` 的**新数组**，因此生产调用方（`compile.ts` / `archive_controller.ts` /
+ * `injection_writer.ts`）逐次命中率极低 —— 这条 memo 实际只在"同一个 events 数组被重复问"的调用点
+ * （如单轮内多次 `estimateT`）生效。要真正省 O(n) 重扫需要一个与数组身份无关的稳定键
+ * （如「块数 + 最大 seq + 水位」，与 `activeIndexFor` 同款），留待后续版本。
+ * 用 `store.version` 做键是错的：`commitArchive` 每次都 `version++`，而绝大多数轮次并没有块被释放。
  * 单槽强引用最多持有 1 个事件数组（编译期间本就存活），不做无界缓存。
  */
 export function sumActiveInjectionTokens(
@@ -225,6 +248,9 @@ export function resetInjectionTokenCache(): void {
  * 归档把水位从 `before` 推到 `after` 后，**被释放**的块 token 合计。
  *
  * 只扫注入块（块数级，通常 < 10），不扫全量事件 ⇒ 归档循环里把 T 的修正成本从 O(n) 降到 O(块数)。
+ *
+ * 判定区间与 `isReleased` 严格同口径（`afterSeq < 水位`）：本轮由活动变释放的块是
+ * `before <= afterSeq < after`。注意左端取等、右端不取等 —— 锚在旧水位上的块在推进前是活动的。
  */
 export function releasedInjectTokens(
     events: readonly InjectionEventLike[], before: number, after: number,
@@ -237,7 +263,8 @@ export function releasedInjectTokens(
         const meta = injectionOf(event);
         if (!meta) continue;
         // 水位跨过块锚点 ⇒ 本轮由"活动"变"已释放"
-        if (meta.afterSeq > from && meta.afterSeq <= to) released += Math.max(0, meta.tokens);
+        const anchor = Math.max(0, finiteInt(meta.afterSeq) ?? 0);
+        if (anchor >= from && anchor < to) released += Math.max(0, meta.tokens);
     }
     return released;
 }

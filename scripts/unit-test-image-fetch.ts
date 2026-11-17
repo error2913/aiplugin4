@@ -5,7 +5,12 @@
 // 只要实现里对 text() 做过任何字符串加工，高位字节就会在往返中损坏/被替换，下面的字节比对必然失败。
 import assert from 'node:assert/strict';
 
-import { fetchImageAsBase64, resetFetchSlotsForTest } from '../src/resource/image_fetch';
+import {
+    fetchImageAsBase64,
+    orphanFetchCountForTest,
+    resetFetchSlotsForTest,
+    setOrphanGraceMsForTest,
+} from '../src/resource/image_fetch';
 import { isPermanentUrlError } from '../src/resource/image_url';
 
 const NODE_BTOA = (globalThis as any).btoa;   // Node 的 latin1 btoa，与海豹同语义
@@ -49,6 +54,7 @@ function mockFetch(handler: (url: string, init: any) => any): void {
 function restoreAll(): void {
     (globalThis as any).fetch = NODE_FETCH;
     (globalThis as any).btoa = NODE_BTOA;
+    setOrphanGraceMsForTest(null);
     resetFetchSlotsForTest();
     resetCounters();
 }
@@ -504,6 +510,63 @@ export const tests: Record<string, () => Promise<void>> = {
             const results = await Promise.all([p1, p2, p3]);
             for (const r of results) assert.equal(r.ok, true, r.ok ? '' : r.error);
             assert.equal(peak, 2, `错峰并发峰值应为 2，实际 ${peak}`);
+        } finally {
+            restoreAll();
+        }
+    },
+
+    // 超时后底层请求仍在跑 ⇒ 槽位不能立刻归还，否则 20MB×2 的内存上界失效
+    async testImageFetchTimeoutHoldsSlotUntilUnderlyingSettles() {
+        try {
+            let settleFetch: (v: any) => void = () => {};
+            mockFetch(() => new Promise(resolve => { settleFetch = resolve; }));
+            const r = await fetchImageAsBase64('https://a.test/zombie.png', { timeoutMs: 30 });
+            assert.equal(r.ok, false);
+            assert.equal(r.kind, 'network');
+            assert.equal(orphanFetchCountForTest(), 1, '超时后底层请求未 settle ⇒ 应记 1 个孤儿占槽');
+            // 再发起 2 个（MAX_CONCURRENCY=2）：孤儿仍占 1 槽 ⇒ 只能再进 1 个
+            let inflight = 0;
+            let peak = 0;
+            const holds: Array<(v: any) => void> = [];
+            mockFetch(async () => {
+                inflight++;
+                peak = Math.max(peak, inflight);
+                await new Promise<void>(resolve => { holds.push(() => resolve()); });
+                inflight--;
+                return pngResponse();
+            });
+            const jobs = [
+                fetchImageAsBase64('https://a.test/a.png', { timeoutMs: 5000 }),
+                fetchImageAsBase64('https://a.test/b.png', { timeoutMs: 5000 }),
+            ];
+            await sleep(20);
+            assert.equal(peak, 1, `孤儿占槽时并发应只剩 1，实际 ${peak}`);
+            settleFetch(pngResponse());              // 底层结束后孤儿还槽
+            await sleep(20);
+            for (const hold of holds) hold(pngResponse());
+            const results = await Promise.all(jobs);
+            for (const x of results) assert.equal(x.ok, true, x.ok ? '' : x.error);
+            assert.equal(peak, 2, `孤儿还槽后并发应恢复 2，实际 ${peak}`);
+            assert.equal(orphanFetchCountForTest(), 0);
+        } finally {
+            restoreAll();
+        }
+    },
+
+    // 兜底：底层永不 settle 时，宽限到期必须强制还槽（否则下载能力永久降级为 0）
+    async testImageFetchOrphanSlotForceReleasedAfterGrace() {
+        try {
+            setOrphanGraceMsForTest(30);
+            mockFetch(() => new Promise(() => { /* 永不 settle */ }));
+            const r = await fetchImageAsBase64('https://a.test/blackhole.png', { timeoutMs: 20 });
+            assert.equal(r.ok, false);
+            assert.equal(orphanFetchCountForTest(), 1, '宽限内应仍占槽');
+            await sleep(80);
+            assert.equal(orphanFetchCountForTest(), 0, '宽限到期应强制回收槽位');
+            // 回收后仍需能继续下载
+            mockFetch(() => pngResponse());
+            const ok = await fetchImageAsBase64('https://a.test/next.png', { timeoutMs: 2000 });
+            assert.equal(ok.ok, true, ok.ok ? '' : ok.error);
         } finally {
             restoreAll();
         }

@@ -193,7 +193,7 @@ SealDice 的 JS 插件无法直接调用核心指令（`.ext`、`.help` 等）�
 | `legacyTarget` | 收到过不带 `source` 的老插件报文则为 `true` |
 | `tokenRequired` | 是否启用了 token 校验 |
 
-> `legacyTarget: true` 说明有老插件（4.31.0 及更早）在用真实 ID 降级运行，应升级插件。
+> `legacyTarget: true` 说明有老插件（4.30.1 及更早，未实现 `hello`/`source` 投影）在用真实 ID 降级运行，应升级插件。
 
 ## 排障
 

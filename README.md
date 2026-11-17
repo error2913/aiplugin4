@@ -336,7 +336,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 启用报错自动处理 | 模型请求报错时按语义类别自动处理（上下文超长归档重试 / 余额不足切模型 / 限速退避等）；未覆盖或无法处理的错误仅记日志不回复（默认开启） |
-| 上下文超长自动归档重试 | 模型返回上下文超长时，把本轮请求预算收紧到模型窗口内（目标 = min(本地预算, 报文窗口) × 0.8）后直接重发一次；不调用摘要、不删除原文；关闭则该场景仅记日志（默认开启） |
+| 上下文超长自动归档重试 | 模型返回上下文超长时，把活动上下文**零 LLM 硬切归档**到模型窗口内（目标 = min(本地预算, 报文窗口) × 0.8）后重发一次；不调用摘要、不删除原文（仍可 `read_raw` 回查）；关闭则该场景仅记日志（默认开启） |
 | 余额不足自动切换模型 | 对话模型报余额不足 / 欠费 / 额度用尽时，自动把 chat 用途切换到备用模型（写入全局模型覆盖，管理员可用 `.ai model` 改回）（默认开启） |
 | 自动切换触发错误 | 每框一个触发自动切换的类别：`balance`（余额不足）/ `permission`（权限不足）；其余类别仅退避重试或记日志（默认 balance） |
 | 自动切换策略 | 跨厂商优先 = 优先切到不同服务商的模型；连接顺序 = 按 `providers` 顺序 / 候选顺序取下一个不同模型 |
@@ -357,13 +357,13 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 |:---:|:---|
 | 预设上下文 | 每框一条预设上下文，role 按 user / assistant 轮流出现，位于上下文最前面，帮助模型学习对话语气 |
 | 上下文预算 | 上下文 token 预算（默认 131072）；0 = 跟随报错探测到的模型真实窗口 × 0.8（未探测到回退 100 万），显式正数优先 |
-| 保留强度 | 压缩后保留最新原文占上下文预算的百分比（默认 30，范围 1-100）；其余滚动摘要。4.32.0 起不再兼职「标签边界」：历史消息已不带 `[msg_id]`/`[time]`（见下文「前缀缓存」） |
+| 保留强度 | 压缩后保留最新原文占上下文预算的百分比（默认 30，范围 1-100）；其余滚动摘要。4.31.0 起不再兼职「标签边界」：历史消息已不带 `[msg_id]`/`[time]`（见下文「前缀缓存」） |
 | 待机入库配额 | 待机会话每小时最多入库多少条普通群消息（默认 0=不限制） |
 | 归档保留原文 | 默认开启：归档后原文页保留，可 `grep_raw`/`read_raw` 回查。关闭后，已被滚动摘要覆盖的归档页会被物理清除、之后检索不可达（省存储，不省 LLM；未总结的硬切/待机归档块仍保留原文直到被总结覆盖） |
 
 > 旧版「上下文最大token / 对话保存轮数 / 窗口上限字数 / 冷态窗口字数 / 消息压缩阈值 / 结算水位 / 每小时后台压缩上限…」等键已不再注册；升级后请按新键重新配置。
 
-#### 前缀缓存：为什么聊得越久越省钱（4.32.0）
+#### 前缀缓存：为什么聊得越久越省钱（4.31.0）
 
 主流大模型服务商对「请求体开头与上一次相同」的部分按缓存价计费（通常只有正常输入价的 1/10 甚至更低），命中的部分也不需要重新预填充，首字更快。命中是按**字节前缀**判定的：请求体最前面只要有一个字节变了，它后面的全部失效。
 
@@ -468,7 +468,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 设置项 | 说明 |
 |:---:|:---|
 | 是否启用MCP | MCP 功能总开关，默认关闭；开启后才会解析并连接下方「MCP服务器」中的服务器并注册其工具，未安装对应 MCP 后端时建议保持关闭 |
-| MCP服务器 | **标准 MCP 配置 JSON**（与 Claude Desktop / Cursor 的 `.mcp.json` 顶层结构一致）：`{"mcpServers":{"服务器名":{"type":"http","url":"…","headers":{…}}}}`。键 = 服务器名；`type` 仅支持 `http` / `streamable-http`，stdio（`command`）与 SSE 会被跳过；`platform` 是 aiplugin4 扩展字段（可选平台白名单，`[]` 或省略 = 所有平台）；`exposeInstructions`（可选，默认 `false`）= 是否把服务器 `initialize` 返回的 `instructions` 以低权威 runtime 段注入提示词（外部清洗、单服务器 ≤1000 字符、合计 ≤2000 字符）。生成器里用「启用」开关控制是否写入，关闭的服务器不会出现在 JSON 里（不写 `enabled` 字段）。工具名称、描述、参数 schema 与 `annotations` 连接后经远端 `tools/list` 自动发现并注册（来源分组 = 服务器名；`destructiveHint=true` 的工具按敏感工具处理），同名冲突自动跳过；服务器 platform 与当前平台不匹配时其工具不可见且调用被拦截。MCP prompts/resources 通过 `.ai mcp prompt list|get` 与 `mcp_list_resources`/`mcp_read_resource` 按需使用，不会自动注入 system prompt。**插件默认空配置（不预置服务器）**，避免没配 MCP 时启动/对话报错；配置生成器的「MCP」页仍保留三台示例：mcp-files-exec（read_file/list_dir/write_file/delete_file/download_file/run_shell/export_file，相对路径与命令工作目录按 AI 会话隔离）、md-html-render（platform: [QQ]，render_markdown/render_html）、mcp-browser（browser_navigate/click/type/snapshot/take_screenshot/wait_for/close 等浏览器操作，按 AI 会话隔离），按需复制使用。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest)；推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)「MCP」页生成后粘贴 |
+| MCP服务器 | **标准 MCP 配置 JSON**（与 Claude Desktop / Cursor 的 `.mcp.json` 顶层结构一致）：`{"mcpServers":{"服务器名":{"type":"http","url":"…","headers":{…}}}}`。键 = 服务器名；`type` 仅支持 `http` / `streamable-http`，stdio（`command`）与 SSE 会被跳过；`platform` 是 aiplugin4 扩展字段（可选平台白名单，`[]` 或省略 = 所有平台）；`exposeInstructions`（可选，默认 `false`）= 是否把服务器 `initialize` 返回的 `instructions` 以**低权威增量注入块**注入提示词（`[system:inject-mcp]` 包裹，外部清洗、单服务器 ≤1000 字符、合计 ≤2000 字符）。生成器里用「启用」开关控制是否写入，关闭的服务器不会出现在 JSON 里（不写 `enabled` 字段）。工具名称、描述、参数 schema 与 `annotations` 连接后经远端 `tools/list` 自动发现并注册（来源分组 = 服务器名；`destructiveHint=true` 的工具按敏感工具处理），同名冲突自动跳过；服务器 platform 与当前平台不匹配时其工具不可见且调用被拦截。MCP prompts/resources 通过 `.ai mcp prompt list|get` 与 `mcp_list_resources`/`mcp_read_resource` 按需使用，不会自动注入 system prompt。**插件默认空配置（不预置服务器）**，避免没配 MCP 时启动/对话报错；配置生成器的「MCP」页仍保留三台示例：mcp-files-exec（read_file/list_dir/write_file/delete_file/download_file/run_shell/export_file，相对路径与命令工作目录按 AI 会话隔离）、md-html-render（platform: [QQ]，render_markdown/render_html）、mcp-browser（browser_navigate/click/type/snapshot/take_screenshot/wait_for/close 等浏览器操作，按 AI 会话隔离），按需复制使用。格式定义见 [MCP 官方规范](https://modelcontextprotocol.io/specification/latest)；推荐用[配置生成器](https://error2913.github.io/aiplugin4-config/)「MCP」页生成后粘贴 |
 | MCP会话空闲回收分钟 | MCP 会话（含浏览器操作）空闲超过该分钟数后自动回收，释放服务端浏览器状态；设为 0 不回收（默认 10） |
 | MCP每服务器最大会话数 | 每个 MCP 服务器最多同时保留的 AI 会话数，超出后按最近使用时间回收最旧会话；浏览器操作按 AI 会话隔离（默认 3） |
 
@@ -567,7 +567,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 | 设置项 | 说明 |
 |:---:|:---|
-| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效；图片转 base64 由插件直接下载完成，不需要 46678 后端（旧配置里的 `backends.image-url-to-base64` 不再注册/读取，可自行删除）。**核心桥的 url 必须是完整 URL**（默认 `ws://127.0.0.1:46880/plugin`，填纯端口会让整份配置校验失败回退出厂默认）；桥自己的运行配置（`mode`/`platform`/`virtual_*`/`core_token`/`plugin_token` 等 13 键）在启动器卡片「⚙ 配置」里，端口在启动器「端口」输入框里，都不在这个 JSON 中 |
+| 后端配置 | 整份后端地址（JSON v1）。在 [aiplugin4-backends](https://github.com/error2913/aiplugin4-backends) 的 WebUI 点「📋 复制后端配置」后整段粘贴；包含流式输出、图床、媒体转base64、用量图表、核心桥的地址与 token。图床的 `url` 是插件访问地址（可为 `127.0.0.1`），**`publicUrl` 是协议端与模型都能访问的对外 IP/域名**（复制时「图床对外地址」一栏自动生成，留空会自动探测本机 IP）；没有 `publicUrl` 时发图/模型取图自动降级。**复制内容会带上各后端已设置的访问 token（请勿公开分享）；给后端设/改 token 后要重启该后端并重新复制一次**（token 不一致会 401，日志会提示去哪个 `backends.<名>.token` 核对）。留空 = 全部使用出厂默认地址；修改后约 60 秒生效；图片转 base64 由插件直接下载完成，不需要 46678 后端（旧配置里的 `backends.image-url-to-base64` 不再注册/读取，可自行删除）。**核心桥的 url 必须是完整 URL**（默认 `ws://127.0.0.1:46880/plugin`，填纯端口会让整份配置校验失败回退出厂默认）；桥自己的运行配置（`platform`/`virtual_self_id`/`virtual_nickname` 三项；token 用启动器给该后端设的那个通用 token，不再有 `core_token`/`plugin_token`）在启动器卡片「⚙ 配置」里，端口在启动器「端口」输入框里，都不在这个 JSON 中 |
 
 > 各后端服务相互独立，可按需自建；除流式输出外，其余服务并非核心功能所必需。
 
@@ -603,13 +603,13 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 
 自 4.29.0 起，system prompt 由内置**英文段注册表**组装（不再是一份大模板）：
 
-- 稳定段进 system：身份 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片与图库 / 回复方式 / 工作方向 / **能力地图** / 工具获取或调用格式 / 可用技能 / 知识库 / 子代理委派；段级缓存 30 秒（技能/知识库/工具开关/角色设定等任一变化即失效）。4.32.0 起这些段全部是**常量或纯配置门控**的：不再枚举会话里的工具/技能/知识库，图库数量、最近宿主 ID、`resource:<name>` 清单也改由 `list_resources` / 图片工具现场查询 —— 这样图床掉线、增删资源都不会改写 system 前缀。
+- 稳定段进 system：身份 / 角色 / 回复语言 / 会话信息 / 消息标记 / 图片与图库 / 回复方式 / 工作方向 / **能力地图** / 工具获取或调用格式 / 可用技能 / 知识库 / 子代理委派；段级缓存 30 秒（技能/知识库/工具开关/角色设定等任一变化即失效）。4.31.0 起这些段全部是**常量或纯配置门控**的：不再枚举会话里的工具/技能/知识库，图库数量、最近宿主 ID、`resource:<name>` 清单也改由 `list_resources` / 图片工具现场查询 —— 这样图床掉线、增删资源都不会改写 system 前缀。
 - **能力地图**：按当前会话已开启、平台匹配的工具组列出“能力域 + 用途 + 2 个代表工具”（不含参数），并明确要求“不确定能力时先 list_tools/search_tools，不要直接说做不到”；STATUS 关闭或无可用工具时不出现。MCP 服务器的用途标签取配置 `description`，缺省用 `initialize` 的 `serverInfo.title`，再缺省用服务器名。
-- **运行期可变内容不含在 system 里**（4.32.0 起）：当前时间 / 长期记忆 / MCP 服务器说明改为「增量注入块」，只在内容变化时追加到对话末尾，system 前缀逐轮字节稳定。原「易变段走 runtime」的 `[system:runtime]` 尾块已删除；`PromptParts.runtime` 字段仅为兼容外部 hook 签名而保留（恒为空）。
+- **运行期可变内容不含在 system 里**（4.31.0 起）：当前时间 / 长期记忆 / MCP 服务器说明改为「增量注入块」，只在内容变化时追加到对话末尾，system 前缀逐轮字节稳定。原「易变段走 runtime」的 `[system:runtime]` 尾块已删除；`PromptParts.runtime` 字段仅为兼容外部 hook 签名而保留（恒为空）。
 - 内置提示词与代码生成的上下文标记均为英文且**不兼容旧中文标记**（旧会话中的中文标记按普通文本保留）；角色设定、技能正文、知识库正文等用户内容保持原语言，机器人按对话语言回复。
 - 外部插件可注册扩展段：`globalThis.aiplugin4.registerPromptSection({ name: 'ext:xxx:yyy', order: 10000, channel: 'system', build: ctx => '...' })`（限 `ext:` 命名空间、单段 ≤2000 字符、合计 ≤4000 字符、默认外部清洗）；也可用 `onPromptAssemble(fn)` 整体改写 system（返回 `runtime` 文本已不生效，只会打一条 warning）。外部插件还可注册**注入 provider**（`registerExtensionInjectionProvider`）：产出的条目会作为增量注入块追加到对话尾部，而不是塞进 system。
 - 调试：`.ai prompt` 查看 system prompt；`.ai prompt sections` 查看段统计（order/name/channel/chars/tokens/cache）与 digest。开发侧可用 `npm run prompt:snapshot` 把 group/private 两种会话的 system/段统计输出到 `test-reports/prompt-baseline/`，便于重构前后对比。
-- MCP 服务器 `initialize` 返回的 `instructions` 默认不注入；在「MCP服务器」对应条目加 `"exposeInstructions": true` 后以**低权威增量注入块**注入（4.32.0 起不再走 runtime 段；外部清洗、单服务器 ≤1000 字符、合计 ≤2000 字符，`[system:inject-mcp]` 包裹）。MCP prompts/resources 由 `.ai mcp prompt list|get` 与 `mcp_list_resources`/`mcp_read_resource` 按需使用，不自动进 system prompt。每台服务器可选 `"description": "用途一句话"`（能力地图与 `.ai mcp list` 展示用途；缺省用 initialize 的 `serverInfo.title`）。
+- MCP 服务器 `initialize` 返回的 `instructions` 默认不注入；在「MCP服务器」对应条目加 `"exposeInstructions": true` 后以**低权威增量注入块**注入（4.31.0 起不再走 runtime 段；外部清洗、单服务器 ≤1000 字符、合计 ≤2000 字符，`[system:inject-mcp]` 包裹）。MCP prompts/resources 由 `.ai mcp prompt list|get` 与 `mcp_list_resources`/`mcp_read_resource` 按需使用，不自动进 system prompt。每台服务器可选 `"description": "用途一句话"`（能力地图与 `.ai mcp list` 展示用途；缺省用 initialize 的 `serverInfo.title`）。
 - 发现类工具（`list_tools`/`search_tools`/`list_mcps`/`call_tool`）的模型可见结果与错误为英文；`list_tools` 组头带代表工具与分页提示，`search_tools` 返回完整参数并提示用 `call_tool` 执行。
 
 ---
@@ -627,7 +627,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | `.ai priv st <指令> <权限限制>` | `.ai priv st ai-sb 0-0-0` | 修改具体命令的权限限制，指令用 `-` 连接，权限限制格式为「会话-用户-强触」 |
 | `.ai priv show <指令>` | - | 检查指定指令的权限限制 |
 | `.ai priv reset` | - | 重置所有指令权限为默认 |
-| `.ai prompt` | - | 查看当前 system prompt 与 runtime 段（骰主；过长时仅记录日志） |
+| `.ai prompt` | - | 查看当前 system prompt（骰主；过长时仅记录日志）。4.31.0 起 runtime 通道已移除，`.ai prompt sections` 的 channel 列恒为 `system` |
 | `.ai prompt sections` | - | 查看提示词段统计（order/name/channel/chars/tokens/cache）与 digest（骰主） |
 | `.ai block add <用户ID/群ID> <原因>` | `.ai block add QQ:1234567890 乱发广告` | 拉黑用户/群（骰主），被拉黑对象无法触发 AI 对话 |
 | `.ai block rm <用户ID/群ID>` | - | 移除黑名单 |
@@ -640,7 +640,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 | 命令 | 使用示例 | 说明 |
 |:---:|:---:|:---|
 | `.ai status` | - | 查看当前会话状态：平台/会话类型/模型名/权限/上下文轮数/缓存率/各触发开关；含本会话缓存率（近 100 轮命中率，与 `.ai ctx` 的「缓存」行同源）。连接与模型列表看 `.ai model`（骰主），触发域看 `.ai trg` |
-| `.ai ctx` | - | 查看上下文状态：消息数、预算/保留强度、L/A/B/C 水位、归档与在飞总结、清理状态、最近一次整理结果；4.32.0 起另加四行：`前缀`（稳定 / 已重建 N 次（最近原因：X））、`注入`（活动块数/token/跳过数）、`前缀守卫`（上次校验通过 / 首差异位置 N / -）、`缓存`（近 100 轮命中率） |
+| `.ai ctx` | - | 查看上下文状态：消息数、预算/保留强度、L/A/B/C 水位、归档与在飞总结、清理状态、最近一次整理结果；4.31.0 起另加四行：`前缀`（稳定 / 已重建 N 次（最近原因：X））、`注入`（活动块数/token/跳过数）、`前缀守卫`（上次校验通过 / 首差异位置 N / -）、`缓存`（近 100 轮命中率） |
 | `.ai ctx archive` | - | **手动**归档为滚动摘要并抽取长期记忆（会花 LLM）；默认不删原文（「归档保留原文」关闭时清理已总结归档页） |
 | `.ai ctx hide [user\|assistant\|all]` | `.ai ctx hide assistant` | 隐藏消息（原文保留，可审计；不影响长期记忆） |
 | `.ai ctx purge --yes` | - | 清除本会话上下文（不可恢复；仅骰主；不影响长期记忆） |
@@ -803,7 +803,7 @@ AI骰娘4 是一款运行在 [SealDice](https://docs.sealdice.com/) 上的智能
 |:---:|:---|
 | Dispatch | `list_tools`（按工具组列出当前平台工具）、`search_tools`（按名称/关键词/工具组发现工具并取参数）、`list_mcps`（列出当前平台可用 MCP 服务器及工具）、`call_tool`（统一执行任意工具） |
 | Commands | `run_ext_command`（本地执行扩展指令）、`run_core_command`（经核心桥 WebSocket 在桥的虚拟端点上执行核心指令；桥默认是独立 OB11 协议端） |
-| Timers | `set_timer`、`show_timer_list`、`cancel_timer`、`get_time`（返回当前时间与时区偏移；4.32.0 起历史消息不再带 `[time]`，AI 需要"现在几点"时用它） |
+| Timers | `set_timer`、`show_timer_list`、`cancel_timer`、`get_time`（返回当前时间与时区偏移；4.31.0 起历史消息不再带 `[time]`，AI 需要"现在几点"时用它） |
 | Triggers | `set_trigger_condition` |
 | Memory | `memory_recall`、`memory_add`、`memory_update`、`memory_delete`、`memory_consolidate`、`memory_reflect`、`memory_mental_model`（action: list/view/create/refresh/clear/delete） |
 | Images | `image_to_text`（文字描述，`ids[]`≤3）、`image_view`（多模态直接看，`ids[]`≤4；不支持视觉时降级）、`text_to_image`、`meme_list`、`get_meme_info`、`meme_generator` |

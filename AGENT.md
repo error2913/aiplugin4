@@ -18,13 +18,13 @@ npm run lint:prefix:strict  # 前缀纯度扫描（严格：CI 用，陈旧白�
 npm run lint:prefix:selftest # 自测前缀纯度守卫本身（规则必红 / 上下文锚收窄 / 陈旧白名单可检出）
 npx tsc --noEmit            # 类型检查（直跑 tsconfig，不要加 --strict 覆盖）
 npm run smoke               # 冒烟：Node 中用 seal 桩加载产物
-npm run test:unit           # 单元测试全量（63 入口 / 1085 例，~13s；CI 口径）
+npm run test:unit           # 单元测试全量（64 入口 / 1108 例，~19–23s；CI 口径）
 npm run test:unit:list      # 列「域 / 入口 / 用例数」表
 npm run test:unit:only      # 只跑 git 变更影响到的入口（内循环，CI 仍跑全量）
 npm run test:unit:changed   # 先跑变更相关入口、再跑剩余（失败早报）
 npm run test:ob11           # OB11 runtime 模拟
-npm run sim                 # 上下文成本治理端到端模拟（14 项）
-npm run sim:matrix          # 消息顺序/时序矩阵（76 项）
+npm run sim                 # 上下文成本治理端到端模拟（13 项）
+npm run sim:matrix          # 消息顺序/时序矩阵（90 组顺序×预算 + 时序/状态/边界，495 断言）
 npm run fuzz                # 随机化长跑（FUZZ_SEEDS/FUZZ_ROUNDS 可回放）
 npm run package:check       # 构建 + 同步 sealpack 源 + 校验包格式与体积
 npm run pack:sealpack       # 打包 → dist/aiplugin4.sealpack
@@ -56,7 +56,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 - `src/resource/`：`image.ts`（实体/注册表）、`image_url`/`image_inbound`/`image_text`/`image_transfer`/`image_health`（纯逻辑叶子）、`image_host`（图床客户端）、`image_index`/`image_gc`（索引与清理）、`image_ref`（CIR v1）、`local_paths`/`local_images`（本地资源）。
 - `src/config/`：`config.ts` 总线（21 个分组，60s 缓存）、`configs/*` 只解析、`apply/*` + `hooks.ts` 应用、`ext.ts` 宿主句柄叶子、`v5/`（模型配置 schema/adapt/vendor/default）、`domain/`（角色/技能/MCP/知识库 JSON + `default_data.ts` 生成物）、`static_config/`（常量）。
 - `src/quota/`：用量限制——`types`（类型/错误）、`window`（窗口键/时段解析/峰时系数）、`store`（`quotaUsage` 合并写 + 31 天裁剪）、`manager`（判定/预留/记账/排行）；配置页「用量限制」12 键，命令 `.ai tk quota/me/rank`。
-- `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 27 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本、`src/event/trigger.ts` 事件触发规则、`src/pipeline/event_trigger.ts` 事件触发编排；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
+- `src/cmd/`：`.ai` 根命令与权限（`bootstrap.ts` 装配 26 个子命令）；`src/media/` 媒体任务队列；`src/web/` 联网；`src/pub/` 公开会话；`src/event/notice.ts` 事件文本、`src/event/trigger.ts` 事件触发规则、`src/pipeline/event_trigger.ts` 事件触发编排；`src/judge/` 评分；`src/timer.ts`/`src/block.ts`/`src/usage.ts`/`src/token_calibration.ts`。
 - `src/utils/`：通用工具已拆叶子——`message_id`/`path`/`alias`/`similarity`/`id`/`revive`/`timeout`/`json`/`render_tags`/`raw_marker`/`special_id`/`target_id`/`url`/`concurrency`/`backend`/`markdown`/`resource` 等；`utils.ts` 只剩 `replyToSender` 等聚合入口，新代码直接 import 对应叶子。
 - `docs/`：项目知识库（01 概览 / 02 架构 / 03 模块 / 04 工具 / 05 命令配置 / 06 存储 / 07 开发指南 / 08 后端 / 09 常见问题 / 10 TODO / 11 核心桥 / 13 记忆系统）。`*-方案.md` 等设计稿统一放 `.dev/docs-archive/`，不随仓库分发。
 - `skills/aiplugin4-test-suite/`：仓库内置的插件测试技能（Codex 用）；`examples/use-aiplugin4.js`：外部插件调用 API 示例。
@@ -115,7 +115,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 - 单测隔离性巡检：`UNIT_ORDER=reverse | shuffle:<seed> | files-reverse | files-shuffle:<seed> | inner-reverse` 乱序跑；`UNIT_FILES` / `UNIT_TESTS` 按给定顺序只跑指定入口/用例（二分定位污染源）；`UNIT_ORDER_LOG` 落盘实际执行顺序以复现现场；`UNIT_REPORT_ALL=1` 一次拿全失败。**默认顺序全绿不等于隔离干净**：改共享状态（单例/端口/配置/模块级 flag）后至少补跑 `reverse` 与一个 `shuffle`。
 - 单测分域/增量（内循环提速，CI 仍固定跑全量）：
   - `npm run test:unit:list` —— 打印「域 / 入口 / 用例数」表（15 个域见 `scripts/test-unit.cjs` 的 `DOMAINS`，**新增入口必须归域，否则 runner 启动即报错**）。
-  - `npm run test:unit:only` —— 等价 `--changed --only`：按 `git diff HEAD` 的影响面只跑相关入口（实测 0.4–10s）。
+  - `npm run test:unit:only` —— 等价 `--changed --only`：按 `git diff HEAD` 的影响面只跑相关入口（实测 0.3–23s）。
   - `npm run test:unit:changed` —— 先跑相关入口、再跑剩余（失败早报），总耗时与全量基本持平。
   - `node scripts/test-unit.cjs --domain=media --only` —— 只跑指定域；去掉 `--only` 即「该域优先 + 其余随后」。
   - 影响面来自 esbuild metafile（每个产物内联了哪些 `src/` 文件），缓存在 `node_modules/.cache/aiplugin4-unit/manifest.json`；`scripts/test-unit.cjs` 或 `scripts/harness/` 变更一律视为全量。
@@ -128,7 +128,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 
 - 不要用 `tsc --strict` 覆盖 tsconfig 的严格选项（会静默吞掉联合类型未收窄之类的错误）。
 - `deps:check` 报「未分类文件」= 新目录没配 `LAYER_RULES`；报「新增跨层依赖」= 低层 import 高层，改端口注入或下沉叶子（例：`core/prefix_boot.ts` 就是为避开 L2 → L3 反向依赖才放 L0 的）。
-- **前缀纯度门禁**（4.32.0 / #163）：`npm run lint:prefix` 宽松（可疑点只报告）、`npm run lint:prefix:strict` 严格（**白名单失效也算失败**）、`npm run lint:prefix:selftest` 自测守卫自身（规则必红 / 上下文锚必收窄 / 陈旧白名单可检出）。改 `src/context/view/**` 或 `src/utils/message.ts` 必跑。
+- **前缀纯度门禁**（4.31.0 / #163）：`npm run lint:prefix` 宽松（可疑点只报告）、`npm run lint:prefix:strict` 严格（**白名单失效也算失败**）、`npm run lint:prefix:selftest` 自测守卫自身（规则必红 / 上下文锚必收窄 / 陈旧白名单可检出）。改 `src/context/view/**` 或 `src/utils/message.ts` 必跑。
 - PowerShell：主环境已是 pwsh 7（UTF-8）；含中文的 `.ps1` 保留 BOM（5.1 按 ANSI 解析会乱码）。
 - 无 gh CLI 时操作 GitHub：用 `git credential fill`（.NET Process 写 stdin）+ REST API，token 不要打印。
 - 模板仓库 `sealdice-js-ext-template` 与本仓库的 `release.yml` 都不要带 `on.pull_request`。
