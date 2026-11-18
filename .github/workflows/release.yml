@@ -119,9 +119,13 @@ jobs:
             fi
           }
 
+  # GitHub Release 只硬依赖 verify（产物来自它的 artifact），不把对外商店 publish 当门禁：
+  # SealRepo 是第三方服务，它挂掉/改域名时不应连带把 GitHub Release 也卡住（历史事故：
+  # v4.31.0 的 publish-sealrepo 因商店返回 404 失败，github-release 被 skip，只能手工补发）。
+  # publish-sealrepo 失败仍会红着，需要补发商店时重跑该 job 即可。
   github-release:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: publish-sealrepo
+    if: startsWith(github.ref, 'refs/tags/') && needs.verify.result == 'success' && !cancelled()
+    needs: [verify, publish-sealrepo]
     runs-on: ubuntu-latest
     permissions:
       contents: write

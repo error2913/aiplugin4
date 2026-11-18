@@ -98,6 +98,7 @@ npm run docs:build          # 构建文档站点（需 mkdocs）
 
 1. 版本推进：`meta.ts` 的 `VERSION`、`header.txt` 的 `@version`、`package.json` / `package-lock.json` 的 `version`、新增 `src/changelog/<版本>.ts` 数据文件（并 `npm run changelog:gen`）；`sealpack/info.toml` 由 `prepare-sealpack.js` 自动同步；走 PR 合并到 main。
 2. 推送 `v<版本>` 标签 → `release.yml` 自动：verify（标签与 `VERSION`/changelog 数据文件一致）→ `node scripts/build-release.js` 打包（本体 JS + 本体豹包 + 完整豹包）→ 用 `SEALPACK_TOKEN` 发布两个豹包到 SealRepo → 从数据文件提取版本日志创建 GitHub Release。
+   `github-release` 只硬依赖 `verify`（artifacts 来源），**不把 SealRepo 成功当门禁**：商店是第三方服务，它 404/超时时 GitHub Release 照发，`publish-sealrepo` 只是红着等补发（v4.31.0 曾因商店 404 连带 skip release，只能手工补发）。补发姿势：`Actions → Build and Release → 重跑 publish-sealrepo`，或本地 `npx sealpack publish sealpack --create --server "$SEALPACK_SERVER"`（`sealpack-full` 同理）。
 3. 完整包依赖插件在 `scripts/deps.cjs` 的 `dependencies` 配置（`url` 为 raw 地址）；包图标 `sealpack/assets/icon.png`；SealRepo Token 放仓库 secrets（`SEALPACK_TOKEN`）。
 
 ## CI 工作流
