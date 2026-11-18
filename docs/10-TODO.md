@@ -63,3 +63,20 @@
 | 同 anchor 跨轮合并改写已发送消息 | `mergeInjectionMessages`（`src/context/view/compile.ts:765`）把**同 slot** 的多个注入块合并成一条消息。若连续两轮 anchor 相同（例如"可见单元为空 ⇒ `lastSelectedSeq=0` 被夹紧到 `archivedThrough`"），第 2 轮的块会被合并进第 1 轮那条**已发送**消息 ⇒ `stats.prefixDrift` 报点、缓存前缀从该点起失效；冻结守卫按设计不覆盖增量区。不丢内容、不改语义，只损缓存命中 | 把「同 anchor 连续两轮不得合并已发送消息」写成不变量检查；或让 writer 在 `anchor <= 上次 anchor` 时按 `anchor = lastSentSeq` 单调递增 |
 | `activeInjectTokens` 的单槽 memo 命中率低 | memo 键是「events 数组身份 + 水位」，但 `ContextStore.snapshot()` 每次 `events.slice()` 返回新数组 ⇒ 生产调用方（`compile.ts` / `archive_controller.ts` / `injection_writer.ts`）逐次 miss，实际只在单轮内重复问时生效 | 换成与数组身份无关的稳定键（「块数 + 最大 seq + 水位」，与 `activeIndexFor` 同款），否则这层 O(n) 重扫优化等于没做 |
 | `Setting.validKeys` 是死代码 | `src/session/setting.ts` 的 `validKeys` 静态数组无人读取（revive 实际走 `validKeysMap`） | 删除或在 revive 里显式使用；改 `Setting` 字段时不要以为要同步它 |
+
+## 发版遗留：4.31.0 的 SealRepo 发布待补（商店侧故障）
+
+GitHub Release [v4.31.0](https://github.com/error2913/aiplugin4/releases/tag/v4.31.0) 已发布（本体 JS + 两个豹包，正文来自 `src/changelog/4.31.0.ts`），但 **SealRepo（`https://repo.sealdice.com/`）上的 `aiplugin4` / `aiplugin4-full` 4.31.0 仍未上传**。
+
+- 现象：`release.yml` 的 `publish-sealrepo` job 在第 7 步 `Publish to SealRepo` 失败，只输出一行 `404 page not found`（两次尝试、两批 runner 都一样）。直接探测该域名：`/`、`/api/v1/user/me`、`/dice/api/store/info`、`/packages/` 全部 404 或超时，且 `npx sealpack login/whoami` 也无法认证 —— 不是 token 问题，是**商店服务整站不可用**（最近一次成功是 v4.30.1 / 2026-10-31）。
+- 归因不在本仓库：URL 与 CLI 版本（`sealpack@0.1.2`，其内置默认值也是该域名）与 v4.30.1 发布时完全一致；`sealdice-core` 的 `dice/store.go` 里 `officialStoreBackendBaseURL` 至今仍写 `https://repo.sealdice.com`。
+- 补发时机：商店恢复后重跑 `Actions → Build and Release → publish-sealrepo`（`github-release` 已不再依赖它，见 `AGENT.md`「发布流程」），或本地：
+
+  ```bash
+  npx sealpack token set <SEALPACK_TOKEN>
+  npx sealpack publish sealpack     --create --server https://repo.sealdice.com/
+  npx sealpack publish sealpack-full --create --server https://repo.sealdice.com/
+  ```
+
+  若届时该域名仍不通，先去海豹官方渠道确认新地址（`sealdice-core` 的 `officialStoreBackendBaseURL` 或海豹手册），再改 `.github/workflows/release.yml` 的 `SEALPACK_SERVER`。
+
